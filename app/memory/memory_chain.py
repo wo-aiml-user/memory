@@ -1,0 +1,162 @@
+"""
+Memory Chain
+Main orchestration logic for memory-enhanced chat.
+Combines Gemini LLM with Zep memory.
+
+Flow: User Message → Get Context from Zep → Inject into Prompt → Gemini → Response → Store in Zep
+"""
+
+import logging
+from typing import Optional
+from datetime import datetime
+
+from .gemini_client import GeminiClient
+from .zep_client import ZepMemoryClient
+from .prompt import SYSTEM_PROMPT
+
+logger = logging.getLogger("memory_chat.chain")
+
+
+class MemoryChain:
+    """
+    Orchestrates memory-enhanced chat using Gemini LLM and Zep memory.
+    
+    Memory Flow:
+    1. User sends message
+    2. Get context from Zep (includes summary + relevant facts)
+    3. Inject context into system prompt
+    4. Gemini generates response
+    5. Store conversation in Zep
+    """
+    
+    def __init__(
+        self,
+        gemini_client: GeminiClient,
+        memory_client: ZepMemoryClient,
+        auto_store_memory: bool = True,
+    ):
+        """
+        Initialize the memory chain.
+        
+        Args:
+            gemini_client: Gemini LLM client
+            memory_client: Zep memory client
+            auto_store_memory: Automatically store conversations after response
+        """
+        self.llm = gemini_client
+        self.memory = memory_client
+        self.auto_store_memory = auto_store_memory
+        
+        logger.info("MemoryChain initialized (auto_store_memory=%s)", auto_store_memory)
+    
+    async def chat(self, user_id: str, message: str) -> str:
+        """
+        Process a chat message with memory context injection.
+        
+        Flow:
+        1. Get context from Zep
+        2. Inject context into prompt
+        3. Gemini generates response
+        4. Store conversation async
+        
+        Args:
+            user_id: User identifier
+            message: User's message
+        
+        Returns:
+            Assistant's response
+        """
+        logger.info("=" * 80)
+        logger.info("MEMORY CHAIN: PROCESSING CHAT MESSAGE")
+        logger.info("=" * 80)
+        
+        try:
+            # ============================================================
+            # STEP 1: LOG THE INCOMING MESSAGE
+            # ============================================================
+            logger.info("[STEP 1/5] RECEIVED USER MESSAGE")
+            logger.info(f"  User ID: {user_id}")
+            logger.info(f"  Message: {message}")
+            logger.info(f"  Message Length: {len(message)} characters")
+            
+            # ============================================================
+            # STEP 2: GET CONTEXT FROM ZEP
+            # ============================================================
+            logger.info("[STEP 2/5] RETRIEVING CONTEXT FROM ZEP")
+            context = await self.memory.get_context(user_id)
+            
+            if context:
+                logger.info(f"  [OK] Context retrieved!")
+                logger.info(f"  Context Length: {len(context)} characters")
+                # Log a preview of the context
+                preview = context[:300].replace('\n', ' ')
+                logger.info(f"  Context Preview: {preview}...")
+            else:
+                logger.info("  [X] No context available (new user or no history)")
+            
+            # ============================================================
+            # STEP 3: BUILD PROMPT WITH CONTEXT INJECTION
+            # ============================================================
+            logger.info("[STEP 3/5] BUILDING PROMPT WITH CONTEXT INJECTION")
+            
+            if context:
+                system_prompt = f"{SYSTEM_PROMPT}\n\n<USER_CONTEXT>\n{context}\n</USER_CONTEXT>"
+                logger.info(f"  [OK] Context injected into system prompt")
+                logger.info(f"  System Prompt Length: {len(system_prompt)} characters")
+            else:
+                system_prompt = SYSTEM_PROMPT
+                logger.info(f"  Using base system prompt (no context to inject)")
+                logger.info(f"  System Prompt Length: {len(system_prompt)} characters")
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message}
+            ]
+            
+            logger.info(f"  Total messages: {len(messages)}")
+            
+            # ============================================================
+            # STEP 4: CALL GEMINI LLM
+            # ============================================================
+            logger.info("[STEP 4/5] CALLING GEMINI LLM")
+            logger.info(f"  Sending request to Gemini...")
+            
+            start_time = datetime.now()
+            response = self.llm.chat_completion(messages)
+            elapsed = (datetime.now() - start_time).total_seconds()
+            
+            assistant_response = response.choices[0].message.content or ""
+            
+            logger.info(f"  [OK] Response received from Gemini!")
+            logger.info(f"  Response Time: {elapsed:.2f}s")
+            logger.info(f"  Response Length: {len(assistant_response)} characters")
+            logger.info(f"  Response Preview: {assistant_response}")
+            
+            # ============================================================
+            # STEP 5: STORE CONVERSATION IN ZEP
+            # ============================================================
+            if self.auto_store_memory:
+                logger.info("[STEP 5/5] STORING CONVERSATION IN ZEP")
+                logger.info(f"  User Message: {message}")
+                logger.info(f"  Assistant Response: {assistant_response}")
+                
+                await self.memory.add_messages(
+                    user_id=user_id,
+                    user_message=message,
+                    assistant_response=assistant_response,
+                    return_context=False
+                )
+                
+                logger.info(f"  [OK] Conversation stored in Zep")
+            else:
+                logger.info("[STEP 5/5] SKIPPING STORAGE (auto_store_memory=False)")
+            
+            logger.info("=" * 80)
+            logger.info("MEMORY CHAIN: COMPLETED SUCCESSFULLY")
+            logger.info("=" * 80)
+            
+            return assistant_response
+            
+        except Exception as e:
+            logger.exception(f"[ERROR] Memory chain failed: {e}")
+            raise
