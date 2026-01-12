@@ -144,15 +144,28 @@ class ZepMemoryClient:
         Returns:
             Context block if return_context=True, else None
         """
-        logger.info("[STORE] ADDING MESSAGES TO ZEP")
+        logger.info("=" * 70)
+        logger.info("[ZEP STORE] ADDING MESSAGES TO ZEP CLOUD")
+        logger.info("=" * 70)
         
         try:
             # Ensure thread exists
             thread_id = await self._ensure_thread_exists(user_id)
             
-            logger.info(f"[STORE] Thread ID: {thread_id}")
-            logger.info(f"[STORE] User Message: {user_message}")
-            logger.info(f"[STORE] Assistant Response: {assistant_response}")
+            logger.info(f"[ZEP STORE] Thread ID: {thread_id}")
+            logger.info(f"[ZEP STORE] User ID: {user_id}")
+            
+            # Log full message content
+            logger.info("-" * 50)
+            logger.info("[ZEP STORE] MESSAGE PAYLOAD TO ZEP:")
+            logger.info("-" * 50)
+            logger.info("[ZEP STORE] Message 1 (role=user):")
+            for line in user_message.split('\n'):
+                logger.info(f"  | {line}")
+            logger.info("[ZEP STORE] Message 2 (role=assistant):")
+            for line in assistant_response.split('\n'):
+                logger.info(f"  | {line}")
+            logger.info("-" * 50)
             
             messages = [
                 Message(
@@ -165,8 +178,9 @@ class ZepMemoryClient:
                 ),
             ]
             
-            logger.info(f"[STORE] Sending {len(messages)} messages to Zep...")
-            logger.debug(f"[STORE] Messages: {messages}")
+            logger.info(f"[ZEP STORE] Sending {len(messages)} messages to Zep API...")
+            logger.info(f"[ZEP STORE] User message length: {len(user_message)} chars")
+            logger.info(f"[ZEP STORE] Assistant response length: {len(assistant_response)} chars")
             
             response = self.zep.thread.add_messages(
                 thread_id=thread_id,
@@ -174,14 +188,14 @@ class ZepMemoryClient:
                 return_context=return_context,
             )
             
-            logger.info(f"[STORE] Messages added successfully!")
+            logger.info(f"[ZEP STORE] ✓ Messages added to Zep successfully!")
+            logger.info(f"[ZEP STORE] Zep will now extract facts and entities in background")
             
             if return_context and hasattr(response, 'context'):
-                logger.info(f"[STORE] Received context block, length: {len(response.context)}")
-                logger.debug(f"[STORE] Context preview: {response.context}")
+                logger.info(f"[ZEP STORE] Received updated context block ({len(response.context)} chars)")
                 return response.context
             
-            logger.info("[STORE] No context returned")
+            logger.info("[ZEP STORE] No context returned (return_context=False)")
             return None
             
         except Exception as e:
@@ -202,36 +216,45 @@ class ZepMemoryClient:
         Returns:
             Formatted context string
         """
-        logger.info("[RETRIEVE] GETTING CONTEXT FROM ZEP")
+        logger.info("=" * 70)
+        logger.info("[ZEP RETRIEVE] GETTING CONTEXT FROM ZEP CLOUD")
+        logger.info("=" * 70)
         
         try:
             thread_id = self._get_thread_id(user_id)
             
-            logger.info(f"[RETRIEVE] User ID: {user_id}")
-            logger.info(f"[RETRIEVE] Thread ID: {thread_id}")
+            logger.info(f"[ZEP RETRIEVE] User ID: {user_id}")
+            logger.info(f"[ZEP RETRIEVE] Thread ID: {thread_id}")
             
             # Check if thread exists first
             if thread_id not in self._created_threads:
                 try:
+                    logger.info(f"[ZEP RETRIEVE] Checking if thread exists in Zep...")
                     self.zep.thread.get(thread_id=thread_id)
                     self._created_threads.add(thread_id)
+                    logger.info(f"[ZEP RETRIEVE] Thread found in Zep")
                 except NotFoundError:
-                    logger.info(f"[RETRIEVE] Thread does not exist yet: {thread_id}")
-                    logger.info("[RETRIEVE] No context available (new user)")
+                    logger.info(f"[ZEP RETRIEVE] Thread does not exist: {thread_id}")
+                    logger.info("[ZEP RETRIEVE] This is a NEW USER - no memory context available")
                     return ""
             
-            logger.info(f"[RETRIEVE] Fetching user context...")
+            logger.info(f"[ZEP RETRIEVE] Calling Zep API: get_user_context()...")
             
             user_context = self.zep.thread.get_user_context(thread_id=thread_id)
             
             if user_context and hasattr(user_context, 'context') and user_context.context:
                 context = user_context.context
-                logger.info(f"[RETRIEVE] Context retrieved successfully!")
-                logger.info(f"[RETRIEVE] Context length: {len(context)} characters")
-                logger.info(f"[RETRIEVE] Context preview:\n{context}")
+                logger.info(f"[ZEP RETRIEVE] ✓ Context retrieved from Zep!")
+                logger.info(f"[ZEP RETRIEVE] Context length: {len(context)} characters")
+                logger.info("-" * 50)
+                logger.info("[ZEP RETRIEVE] FULL CONTEXT DATA FROM ZEP:")
+                logger.info("-" * 50)
+                for line in context.split('\n'):
+                    logger.info(f"  | {line}")
+                logger.info("-" * 50)
                 return context
             
-            logger.info("[RETRIEVE] No context found for user")
+            logger.info("[ZEP RETRIEVE] No context found (user has no stored memories yet)")
             return ""
             
         except NotFoundError:

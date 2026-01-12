@@ -86,11 +86,14 @@ class MemoryChain:
             context = await self.memory.get_context(user_id)
             
             if context:
-                logger.info(f"  [OK] Context retrieved!")
+                logger.info(f"  [OK] Context retrieved from Zep!")
                 logger.info(f"  Context Length: {len(context)} characters")
-                # Log a preview of the context
-                preview = context[:300].replace('\n', ' ')
-                logger.info(f"  Context Preview: {preview}...")
+                logger.info("  " + "-" * 60)
+                logger.info("  FULL CONTEXT FROM ZEP:")
+                logger.info("  " + "-" * 60)
+                for line in context.split('\n'):
+                    logger.info(f"  | {line}")
+                logger.info("  " + "-" * 60)
             else:
                 logger.info("  [X] No context available (new user or no history)")
             
@@ -101,19 +104,27 @@ class MemoryChain:
             
             if context:
                 system_prompt = f"{SYSTEM_PROMPT}\n\n<USER_CONTEXT>\n{context}\n</USER_CONTEXT>"
-                logger.info(f"  [OK] Context injected into system prompt")
-                logger.info(f"  System Prompt Length: {len(system_prompt)} characters")
+                logger.info(f"  [OK] Context INJECTED into system prompt")
             else:
                 system_prompt = SYSTEM_PROMPT
-                logger.info(f"  Using base system prompt (no context to inject)")
-                logger.info(f"  System Prompt Length: {len(system_prompt)} characters")
+                logger.info(f"  [!] No context to inject (using base prompt only)")
             
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": message}
             ]
             
-            logger.info(f"  Total messages: {len(messages)}")
+            logger.info(f"  System Prompt Length: {len(system_prompt)} characters")
+            logger.info(f"  Total messages to LLM: {len(messages)}")
+            logger.info("  " + "-" * 60)
+            logger.info("  FULL PROMPT BEING SENT TO GEMINI:")
+            logger.info("  " + "-" * 60)
+            for msg in messages:
+                logger.info(f"  [{msg['role'].upper()}]:")
+                for line in msg['content'].split('\n'):
+                    logger.info(f"  | {line}")
+                logger.info("  " + "-" * 40)
+            logger.info("  " + "-" * 60)
             
             # ============================================================
             # STEP 4: CALL GEMINI LLM
@@ -127,18 +138,36 @@ class MemoryChain:
             
             assistant_response = response.choices[0].message.content or ""
             
+            # Log token usage if available
+            usage = self.llm.get_usage(response)
+            
             logger.info(f"  [OK] Response received from Gemini!")
             logger.info(f"  Response Time: {elapsed:.2f}s")
+            logger.info(f"  Token Usage: prompt={usage.get('prompt_tokens', 0)}, completion={usage.get('completion_tokens', 0)}, total={usage.get('total_tokens', 0)}")
             logger.info(f"  Response Length: {len(assistant_response)} characters")
-            logger.info(f"  Response Preview: {assistant_response}")
+            logger.info("  " + "-" * 60)
+            logger.info("  FULL LLM RESPONSE:")
+            logger.info("  " + "-" * 60)
+            for line in assistant_response.split('\n'):
+                logger.info(f"  | {line}")
+            logger.info("  " + "-" * 60)
             
             # ============================================================
             # STEP 5: STORE CONVERSATION IN ZEP
             # ============================================================
             if self.auto_store_memory:
                 logger.info("[STEP 5/5] STORING CONVERSATION IN ZEP")
-                logger.info(f"  User Message: {message}")
-                logger.info(f"  Assistant Response: {assistant_response}")
+                logger.info("  " + "-" * 60)
+                logger.info("  DATA BEING SENT TO ZEP FOR STORAGE:")
+                logger.info("  " + "-" * 60)
+                logger.info(f"  Thread ID: thread_{user_id}")
+                logger.info(f"  [USER MESSAGE]:")
+                for line in message.split('\n'):
+                    logger.info(f"  | {line}")
+                logger.info(f"  [ASSISTANT RESPONSE]:")
+                for line in assistant_response.split('\n'):
+                    logger.info(f"  | {line}")
+                logger.info("  " + "-" * 60)
                 
                 await self.memory.add_messages(
                     user_id=user_id,
@@ -147,7 +176,7 @@ class MemoryChain:
                     return_context=False
                 )
                 
-                logger.info(f"  [OK] Conversation stored in Zep")
+                logger.info(f"  [OK] Conversation stored in Zep - will be processed for facts/entities")
             else:
                 logger.info("[STEP 5/5] SKIPPING STORAGE (auto_store_memory=False)")
             
