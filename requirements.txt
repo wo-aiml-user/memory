@@ -12,6 +12,9 @@ pydantic>=2.0.0
 # Zep Memory
 zep-cloud>=1.0.0
 
+#mem0
+mem0ai>=1.0.0
+
 # Voyage AI for embeddings and reranking
 voyageai>=0.3.0
 

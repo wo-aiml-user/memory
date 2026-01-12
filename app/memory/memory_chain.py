@@ -1,9 +1,9 @@
 """
 Memory Chain
 Main orchestration logic for memory-enhanced chat.
-Combines Gemini LLM with Zep memory.
+Combines Gemini LLM with Mem0 memory.
 
-Flow: User Message → Get Context from Zep → Inject into Prompt → Gemini → Response → Store in Zep
+Flow: User Message -> Search Mem0 for Context -> Inject into Prompt -> Gemini -> Response -> Store in Mem0
 """
 
 import logging
@@ -11,7 +11,7 @@ from typing import Optional
 from datetime import datetime
 
 from .gemini_client import GeminiClient
-from .zep_client import ZepMemoryClient
+from .mem0_client import Mem0MemoryClient
 from .prompt import SYSTEM_PROMPT
 
 logger = logging.getLogger("memory_chat.chain")
@@ -19,20 +19,20 @@ logger = logging.getLogger("memory_chat.chain")
 
 class MemoryChain:
     """
-    Orchestrates memory-enhanced chat using Gemini LLM and Zep memory.
+    Orchestrates memory-enhanced chat using Gemini LLM and Mem0 memory.
     
     Memory Flow:
     1. User sends message
-    2. Get context from Zep (includes summary + relevant facts)
-    3. Inject context into system prompt
+    2. Search Mem0 for relevant memories (using message as query)
+    3. Inject memories into system prompt
     4. Gemini generates response
-    5. Store conversation in Zep
+    5. Store conversation in Mem0
     """
     
     def __init__(
         self,
         gemini_client: GeminiClient,
-        memory_client: ZepMemoryClient,
+        memory_client: Mem0MemoryClient,
         auto_store_memory: bool = True,
     ):
         """
@@ -40,24 +40,24 @@ class MemoryChain:
         
         Args:
             gemini_client: Gemini LLM client
-            memory_client: Zep memory client
+            memory_client: Mem0 memory client
             auto_store_memory: Automatically store conversations after response
         """
         self.llm = gemini_client
         self.memory = memory_client
         self.auto_store_memory = auto_store_memory
         
-        logger.info("MemoryChain initialized (auto_store_memory=%s)", auto_store_memory)
+        logger.info("MemoryChain initialized with Mem0 (auto_store_memory=%s)", auto_store_memory)
     
     async def chat(self, user_id: str, message: str) -> str:
         """
         Process a chat message with memory context injection.
         
         Flow:
-        1. Get context from Zep
-        2. Inject context into prompt
+        1. Search Mem0 for relevant memories
+        2. Inject memories into prompt
         3. Gemini generates response
-        4. Store conversation async
+        4. Store conversation in Mem0
         
         Args:
             user_id: User identifier
@@ -80,16 +80,17 @@ class MemoryChain:
             logger.info(f"  Message Length: {len(message)} characters")
             
             # ============================================================
-            # STEP 2: GET CONTEXT FROM ZEP
+            # STEP 2: SEARCH MEM0 FOR RELEVANT MEMORIES
             # ============================================================
-            logger.info("[STEP 2/5] RETRIEVING CONTEXT FROM ZEP")
-            context = await self.memory.get_context(user_id)
+            logger.info("[STEP 2/5] SEARCHING MEM0 FOR RELEVANT MEMORIES")
+            logger.info(f"  Search query: {message}")
+            context = await self.memory.get_context(user_id, message)
             
             if context:
-                logger.info(f"  [OK] Context retrieved from Zep!")
+                logger.info(f"  [OK] Found relevant memories!")
                 logger.info(f"  Context Length: {len(context)} characters")
                 logger.info("  " + "-" * 60)
-                logger.info("  FULL CONTEXT FROM ZEP:")
+                logger.info("  MEMORIES FROM MEM0:")
                 logger.info("  " + "-" * 60)
                 for line in context.split('\n'):
                     logger.info(f"  | {line}")
@@ -158,7 +159,7 @@ class MemoryChain:
             if self.auto_store_memory:
                 logger.info("[STEP 5/5] STORING CONVERSATION IN ZEP")
                 logger.info("  " + "-" * 60)
-                logger.info("  DATA BEING SENT TO ZEP FOR STORAGE:")
+                logger.info("  DATA BEING SENT TO MEM0 FOR STORAGE:")
                 logger.info("  " + "-" * 60)
                 logger.info(f"  Thread ID: thread_{user_id}")
                 logger.info(f"  [USER MESSAGE]:")
@@ -173,10 +174,9 @@ class MemoryChain:
                     user_id=user_id,
                     user_message=message,
                     assistant_response=assistant_response,
-                    return_context=False
                 )
                 
-                logger.info(f"  [OK] Conversation stored in Zep - will be processed for facts/entities")
+                logger.info(f"  [OK] Conversation stored in Mem0 - will be processed for facts/entities")
             else:
                 logger.info("[STEP 5/5] SKIPPING STORAGE (auto_store_memory=False)")
             

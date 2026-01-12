@@ -1,6 +1,6 @@
 """
 Memory Chat FastAPI
-Standalone FastAPI application using Zep Cloud for memory.
+Standalone FastAPI application using Mem0 for memory.
 """
 
 import os
@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 
-from app.memory.zep_client import ZepMemoryClient
+from app.memory.mem0_client import Mem0MemoryClient
 from app.memory.gemini_client import GeminiClient
 from app.memory.memory_chain import MemoryChain
 
@@ -27,11 +27,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY must be set in .env")
 
-ZEP_API_KEY = os.getenv("ZEP_API_KEY")
-if not ZEP_API_KEY:
-    raise ValueError("ZEP_API_KEY must be set in .env")
-
-VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY")
+MEM0_API_KEY = os.getenv("MEM0_API_KEY")
+if not MEM0_API_KEY:
+    raise ValueError("MEM0_API_KEY must be set in .env")
 
 LOG_DIR = os.getenv("LOG_DIR", ".")
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -64,7 +62,7 @@ if not logger.handlers:
     logger.addHandler(ch)
     logger.addHandler(fh)
 
-logger.info("Starting memory_chat application with Zep Cloud")
+logger.info("Starting memory_chat application with Mem0")
 
 
 # ============================================================================
@@ -77,12 +75,9 @@ gemini_client = GeminiClient(
     model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
 )
 
-logger.info("Initializing Zep memory client")
-memory_client = ZepMemoryClient(
-    zep_api_key=ZEP_API_KEY,
-    voyage_api_key=VOYAGE_API_KEY,
-    voyage_embed_model=os.getenv("VOYAGE_EMBED_MODEL", "voyage-3-large"),
-    voyage_rerank_model=os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5"),
+logger.info("Initializing Mem0 memory client")
+memory_client = Mem0MemoryClient(
+    api_key=MEM0_API_KEY,
 )
 
 logger.info("Initializing memory chain")
@@ -96,7 +91,7 @@ memory_chain = MemoryChain(
 # FastAPI Application
 # ============================================================================
 
-app = FastAPI(title="Memory Chat API")
+app = FastAPI(title="Memory Chat API", version="3.0.0")
 
 
 class ChatRequest(BaseModel):
@@ -112,13 +107,13 @@ class ChatResponse(BaseModel):
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(payload: ChatRequest):
     """
-    Chat endpoint with Zep memory integration.
+    Chat endpoint with Mem0 memory integration.
     
     Flow:
-    1. Get context from Zep (user summary + facts)
-    2. Inject context into system prompt
+    1. Search Mem0 for relevant memories
+    2. Inject memories into system prompt
     3. Generate response via Gemini
-    4. Store conversation in Zep for future context
+    4. Store conversation in Mem0 for future context
     """
     try:
         logger.info(f"[CHAT] user={payload.user_id}, message={payload.message[:50]}...")
@@ -143,7 +138,7 @@ async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "memory": "zep",
+        "memory": "mem0",
         "llm": "gemini",
     }
 

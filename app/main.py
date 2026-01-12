@@ -16,10 +16,9 @@ from app.middleware.logging import LoggingMiddleware
 from app.middleware.jwt_auth import JWTAuthMiddleware
 from app.api.chat.chat_controller import set_chat_service
 from app.api.chat.services.chat_service import ChatService
-from app.api.document.document_controller import set_memory_client as set_document_memory_client
 from app.memory.memory_chain import MemoryChain
 from app.memory.gemini_client import GeminiClient
-from app.memory.zep_client import ZepMemoryClient
+from app.memory.mem0_client import Mem0MemoryClient
 from app.route import setup_routes
 
 
@@ -71,7 +70,7 @@ logger = setup_logging()
 # ============================================================================
 
 # Global instances
-_memory_client: ZepMemoryClient = None
+_memory_client: Mem0MemoryClient = None
 _gemini_client: GeminiClient = None
 _memory_chain: MemoryChain = None
 _chat_service: ChatService = None
@@ -91,13 +90,10 @@ async def initialize_services():
             model=Config.GEMINI_MODEL,
         )
         
-        # Initialize Zep memory client
-        logger.info("Initializing Zep memory client")
-        _memory_client = ZepMemoryClient(
-            zep_api_key=Config.ZEP_API_KEY,
-            voyage_api_key=Config.VOYAGE_API_KEY,
-            voyage_embed_model=Config.VOYAGE_EMBED_MODEL,
-            voyage_rerank_model=Config.VOYAGE_RERANK_MODEL,
+        # Initialize Mem0 memory client
+        logger.info("Initializing Mem0 memory client")
+        _memory_client = Mem0MemoryClient(
+            api_key=Config.MEM0_API_KEY,
         )
         
         # Initialize memory chain
@@ -114,10 +110,7 @@ async def initialize_services():
         # Set service in controller
         set_chat_service(_chat_service)
         
-        # Set memory client in document controller
-        set_document_memory_client(_memory_client)
-        
-        logger.info("All services initialized successfully")
+        logger.info("All services initialized successfully with Mem0")
         
     except Exception as e:
         logger.exception(f"Error initializing services: {e}")
@@ -158,8 +151,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Memory Chat API",
-    description="Chat API with Zep long-term memory",
-    version="2.0.0",
+    description="Chat API with Mem0 long-term memory",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -200,7 +193,7 @@ async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "memory": "zep",
+        "memory": "mem0",
         "llm": "gemini",
     }
 
@@ -210,6 +203,6 @@ async def root():
     """Root endpoint."""
     return {
         "message": "Memory Chat API",
-        "version": "2.0.0",
-        "memory_backend": "Zep Cloud",
+        "version": "3.0.0",
+        "memory_backend": "Mem0 Platform",
     }

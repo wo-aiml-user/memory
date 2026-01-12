@@ -1,7 +1,7 @@
 """
 Document Controller
 Endpoints for document upload and delete.
-Uses Zep graph.add() for business data ingestion.
+Uses Mem0 for memory storage.
 """
 
 import logging
@@ -10,7 +10,7 @@ from typing import Optional
 from datetime import datetime
 
 from app.utils.response import success_response, error_response
-from app.memory.zep_client import ZepMemoryClient
+from app.memory.mem0_client import Mem0MemoryClient
 from app.api.document.services.pdf_operation import process_pdf
 
 logger = logging.getLogger("memory_chat.document")
@@ -18,17 +18,17 @@ logger = logging.getLogger("memory_chat.document")
 router = APIRouter()
 
 # Memory client instance (set by main.py)
-_memory_client: ZepMemoryClient = None
+_memory_client: Mem0MemoryClient = None
 
 
-def set_memory_client(client: ZepMemoryClient) -> None:
+def set_memory_client(client: Mem0MemoryClient) -> None:
     """Set the memory client instance."""
     global _memory_client
     _memory_client = client
     logger.info("Memory client set in document controller")
 
 
-def get_memory_client() -> ZepMemoryClient:
+def get_memory_client() -> Mem0MemoryClient:
     """Get the memory client instance."""
     if _memory_client is None:
         raise RuntimeError("Memory client not initialized")
@@ -69,9 +69,7 @@ async def upload_document(
     file_name: Optional[str] = Form(None),
 ):
     """
-    Upload a document to user's memory via Zep.
-    
-    Uses Zep's graph.add() for business data ingestion.
+    Upload a document to user's memory via Mem0.
     
     Args:
         file: The file to upload
@@ -99,10 +97,11 @@ async def upload_document(
         # Get memory client
         memory_client = get_memory_client()
         
-        # Add to Zep as business data
-        result = await memory_client.add_business_data(
+        # Add to Mem0 as document memory
+        result = await memory_client.add_messages(
             user_id=user_id,
-            data=f"Document: {resolved_file_name}\n\n{content}",
+            user_message=f"I'm uploading a document: {resolved_file_name}",
+            assistant_response=f"Document content from {resolved_file_name}:\n\n{content}",
         )
         
         logger.info(f"[UPLOAD] Storage result: {result}")
@@ -137,7 +136,7 @@ async def delete_document(
     """
     Delete a document from memory.
     
-    Note: Zep may not support direct deletion of individual facts.
+    Note: Mem0 deletion requires memory_id which we don't track yet.
     
     Args:
         file_id: File identifier to delete
@@ -149,7 +148,7 @@ async def delete_document(
     try:
         logger.info(f"[DELETE] Deleting file_id: {file_id}, user: {user_id}")
         
-        # TODO: Check if Zep supports fact deletion
+        # TODO: Implement Mem0 memory deletion (requires tracking memory_id)
         return success_response({
             "message": "Document deletion not yet supported",
             "file_id": file_id,

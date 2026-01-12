@@ -16,10 +16,10 @@ class Config:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     
-    # Zep Memory Configuration
-    ZEP_API_KEY: str = os.getenv("ZEP_API_KEY", "")
+    # Mem0 Memory Configuration
+    MEM0_API_KEY: str = os.getenv("MEM0_API_KEY", "")
     
-    # Voyage AI Configuration (for embeddings)
+    # Voyage AI Configuration (optional, for custom embeddings)
     VOYAGE_API_KEY: str = os.getenv("VOYAGE_API_KEY", "")
     VOYAGE_EMBED_MODEL: str = os.getenv("VOYAGE_EMBED_MODEL", "voyage-3-large")
     VOYAGE_RERANK_MODEL: str = os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5")
@@ -43,7 +43,7 @@ class Config:
         """Validate required configuration."""
         required = [
             ("GEMINI_API_KEY", cls.GEMINI_API_KEY),
-            ("ZEP_API_KEY", cls.ZEP_API_KEY),
+            ("MEM0_API_KEY", cls.MEM0_API_KEY),
         ]
         
         missing = [name for name, value in required if not value]
