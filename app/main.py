@@ -19,7 +19,7 @@ from app.api.chat.services.chat_service import ChatService
 from app.api.document.document_controller import set_memory_client as set_document_memory_client
 from app.memory.memory_chain import MemoryChain
 from app.memory.gemini_client import GeminiClient
-from app.memory.zep_client import ZepMemoryClient
+from app.memory.supermemory_client import SupermemoryClient
 from app.route import setup_routes
 
 
@@ -71,7 +71,7 @@ logger = setup_logging()
 # ============================================================================
 
 # Global instances
-_memory_client: ZepMemoryClient = None
+_memory_client: SupermemoryClient = None
 _gemini_client: GeminiClient = None
 _memory_chain: MemoryChain = None
 _chat_service: ChatService = None
@@ -91,13 +91,10 @@ async def initialize_services():
             model=Config.GEMINI_MODEL,
         )
         
-        # Initialize Zep memory client
-        logger.info("Initializing Zep memory client")
-        _memory_client = ZepMemoryClient(
-            zep_api_key=Config.ZEP_API_KEY,
-            voyage_api_key=Config.VOYAGE_API_KEY,
-            voyage_embed_model=Config.VOYAGE_EMBED_MODEL,
-            voyage_rerank_model=Config.VOYAGE_RERANK_MODEL,
+        # Initialize Supermemory client
+        logger.info("Initializing Supermemory client")
+        _memory_client = SupermemoryClient(
+            api_key=Config.SUPERMEMORY_API_KEY,
         )
         
         # Initialize memory chain
@@ -158,7 +155,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Memory Chat API",
-    description="Chat API with Zep long-term memory",
+    description="Chat API with Supermemory",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -200,7 +197,7 @@ async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "memory": "zep",
+        "memory": "supermemory",
         "llm": "gemini",
     }
 
@@ -211,5 +208,5 @@ async def root():
     return {
         "message": "Memory Chat API",
         "version": "2.0.0",
-        "memory_backend": "Zep Cloud",
+        "memory_backend": "Supermemory",
     }

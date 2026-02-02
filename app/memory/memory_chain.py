@@ -11,7 +11,7 @@ from typing import Optional
 from datetime import datetime
 
 from .gemini_client import GeminiClient
-from .zep_client import ZepMemoryClient
+from .supermemory_client import SupermemoryClient
 from .prompt import SYSTEM_PROMPT
 
 logger = logging.getLogger("memory_chat.chain")
@@ -23,7 +23,7 @@ class MemoryChain:
     
     Memory Flow:
     1. User sends message
-    2. Get context from Zep (includes summary + relevant facts)
+    2. Get context from Supermemory (search based on query)
     3. Inject context into system prompt
     4. Gemini generates response
     5. Store conversation in Zep
@@ -32,7 +32,7 @@ class MemoryChain:
     def __init__(
         self,
         gemini_client: GeminiClient,
-        memory_client: ZepMemoryClient,
+        memory_client: SupermemoryClient,
         auto_store_memory: bool = True,
     ):
         """
@@ -40,7 +40,7 @@ class MemoryChain:
         
         Args:
             gemini_client: Gemini LLM client
-            memory_client: Zep memory client
+            memory_client: SupermemoryClient
             auto_store_memory: Automatically store conversations after response
         """
         self.llm = gemini_client
@@ -54,7 +54,7 @@ class MemoryChain:
         Process a chat message with memory context injection.
         
         Flow:
-        1. Get context from Zep
+        1. Search context in Supermemory
         2. Inject context into prompt
         3. Gemini generates response
         4. Store conversation async
@@ -80,16 +80,16 @@ class MemoryChain:
             logger.info(f"  Message Length: {len(message)} characters")
             
             # ============================================================
-            # STEP 2: GET CONTEXT FROM ZEP
+            # STEP 2: SEARCH CONTEXT IN SUPERMEMORY
             # ============================================================
-            logger.info("[STEP 2/5] RETRIEVING CONTEXT FROM ZEP")
-            context = await self.memory.get_context(user_id)
+            logger.info("[STEP 2/5] SEARCHING CONTEXT IN SUPERMEMORY")
+            context = await self.memory.search_context(user_id, message)
             
             if context:
-                logger.info(f"  [OK] Context retrieved from Zep!")
+                logger.info(f"  [OK] Context found in Supermemory!")
                 logger.info(f"  Context Length: {len(context)} characters")
                 logger.info("  " + "-" * 60)
-                logger.info("  FULL CONTEXT FROM ZEP:")
+                logger.info("  RELEVANT CONTEXT:")
                 logger.info("  " + "-" * 60)
                 for line in context.split('\n'):
                     logger.info(f"  | {line}")
@@ -156,9 +156,9 @@ class MemoryChain:
             # STEP 5: STORE CONVERSATION IN ZEP
             # ============================================================
             if self.auto_store_memory:
-                logger.info("[STEP 5/5] STORING CONVERSATION IN ZEP")
+                logger.info("[STEP 5/5] STORING CONVERSATION IN SUPERMEMORY")
                 logger.info("  " + "-" * 60)
-                logger.info("  DATA BEING SENT TO ZEP FOR STORAGE:")
+                logger.info("  DATA BEING SENT TO SUPERMEMORY FOR STORAGE:")
                 logger.info("  " + "-" * 60)
                 logger.info(f"  Thread ID: thread_{user_id}")
                 logger.info(f"  [USER MESSAGE]:")
@@ -176,7 +176,7 @@ class MemoryChain:
                     return_context=False
                 )
                 
-                logger.info(f"  [OK] Conversation stored in Zep - will be processed for facts/entities")
+                logger.info(f"  [OK] Conversation stored in Supermemory")
             else:
                 logger.info("[STEP 5/5] SKIPPING STORAGE (auto_store_memory=False)")
             
