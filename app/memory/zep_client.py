@@ -5,6 +5,8 @@ Keeps Voyage AI for embeddings.
 """
 
 import logging
+import json
+import uuid
 from typing import Optional, List
 from datetime import datetime
 
@@ -14,6 +16,7 @@ from zep_cloud.errors import NotFoundError
 
 from .embedding import VoyageEmbedder
 from .reranker import VoyageReranker
+from .chunking import chunk_text
 
 logger = logging.getLogger("memory_chat.zep")
 
@@ -188,7 +191,7 @@ class ZepMemoryClient:
                 return_context=return_context,
             )
             
-            logger.info(f"[ZEP STORE] ✓ Messages added to Zep successfully!")
+            logger.info(f"[ZEP STORE] [OK] Messages added to Zep successfully!")
             logger.info(f"[ZEP STORE] Zep will now extract facts and entities in background")
             
             if return_context and hasattr(response, 'context'):
@@ -244,7 +247,7 @@ class ZepMemoryClient:
             
             if user_context and hasattr(user_context, 'context') and user_context.context:
                 context = user_context.context
-                logger.info(f"[ZEP RETRIEVE] ✓ Context retrieved from Zep!")
+                logger.info(f"[ZEP RETRIEVE] [OK] Context retrieved from Zep!")
                 logger.info(f"[ZEP RETRIEVE] Context length: {len(context)} characters")
                 logger.info("-" * 50)
                 logger.info("[ZEP RETRIEVE] FULL CONTEXT DATA FROM ZEP:")
@@ -268,39 +271,64 @@ class ZepMemoryClient:
         self,
         user_id: str,
         data: str,
-        data_type: str = "text"
+        source: str = "document"
     ) -> str:
         """
-        Add business data (documents) to user's graph.
+        Add large document to Zep with automatic chunking.
+        
+        Handles Zep's 10,000 character limit by splitting documents
+        into smaller chunks with overlap for context continuity.
         
         Args:
             user_id: User identifier
-            data: The data/document content
-            data_type: Type of data
+            data: The document content (can be any size)
+            source: Source/name of the document
         
         Returns:
-            Status message
+            Status message with chunk count
         """
-        logger.info("[DOCUMENT] ADDING BUSINESS DATA TO ZEP")
+        logger.info("=" * 70)
+        logger.info("[DOCUMENT] ADDING BUSINESS DATA TO ZEP (WITH CHUNKING)")
+        logger.info("=" * 70)
         
         try:
             logger.info(f"[DOCUMENT] User ID: {user_id}")
-            logger.info(f"[DOCUMENT] Data Type: {data_type}")
-            logger.info(f"[DOCUMENT] Data Length: {len(data)} characters")
-            logger.info(f"[DOCUMENT] Data Preview: {data}")
+            logger.info(f"[DOCUMENT] Source: {source}")
+            logger.info(f"[DOCUMENT] Total Data Length: {len(data)} characters")
             
             # Ensure user exists by creating a thread first
             await self._ensure_thread_exists(user_id)
             
-            # Add data to graph - type must be "message", "text", or "json"
-            self.zep.graph.add(
-                user_id=user_id,
-                type="text",  # Use "text" for document content
-                data=data,
-            )
+            # 1. Generate unique document ID
+            doc_id = f"doc_{uuid.uuid4().hex[:8]}"
+            logger.info(f"[DOCUMENT] Generated Document ID: {doc_id}")
             
-            logger.info(f"[DOCUMENT] Data added successfully!")
-            return "Data added successfully."
+            # 2. Chunk the data (9000 chars with 50 char overlap)
+            chunks = chunk_text(data, chunk_size=9000, overlap=50)
+            total_chunks = len(chunks)
+            
+            logger.info(f"[DOCUMENT] Split into {total_chunks} chunk(s)")
+            
+            # 3. Add each chunk to Zep graph
+            for idx, chunk_content in enumerate(chunks):
+                chunk_data = json.dumps({
+                    "content": chunk_content,
+                    "doc_id": doc_id,
+                    "chunk_index": idx + 1,
+                    "total_chunks": total_chunks,
+                    "source": source
+                })
+                
+                self.zep.graph.add(
+                    user_id=user_id,
+                    type="json",
+                    data=chunk_data
+                )
+                logger.info(f"[DOCUMENT] [OK] Added chunk {idx + 1}/{total_chunks} ({len(chunk_content)} chars)")
+            
+            success_msg = f"Document added successfully ({total_chunks} chunks, doc_id: {doc_id})"
+            logger.info(f"[DOCUMENT] {success_msg}")
+            return success_msg
             
         except Exception as e:
             logger.exception(f"[DOCUMENT] Error adding data: {e}")
