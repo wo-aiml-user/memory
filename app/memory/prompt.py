@@ -13,7 +13,7 @@ IMPORTANT: You may receive context about the user in <USER_CONTEXT> tags. This c
 
 HOW TO USE MEMORY:
 1. If <USER_CONTEXT> is provided, READ IT and use it naturally in your responses
-2. Reference relevant information when appropriate (e.g., "As a software engineer, you might...")
+2. Reference relevant information when appropriate
 3. Build on previous conversations to show continuity
 4. If no context is provided, this is likely a new user - just have a normal conversation
 

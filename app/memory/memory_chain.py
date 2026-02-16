@@ -1,191 +1,127 @@
 """
 Memory Chain
-Main orchestration logic for memory-enhanced chat.
-Combines Gemini LLM with Zep memory.
-
-Flow: User Message → Get Context from Zep → Inject into Prompt → Gemini → Response → Store in Zep
+Main orchestration logic for memory-enhanced chat using Gemini SDK and Tools.
 """
 
 import logging
-from typing import Optional
-from datetime import datetime
+import os
+from typing import Optional, List, Dict, Any
 
-from .gemini_client import GeminiClient
-from .supermemory_client import SupermemoryClient
-from .prompt import SYSTEM_PROMPT
+from google import genai
+from google.genai import types
+
+# Import new tools and init
+from .memory_tools import init_tools, store_memory_tool, retrieve_memory_tool
 
 logger = logging.getLogger("memory_chat.chain")
 
-
 class MemoryChain:
     """
-    Orchestrates memory-enhanced chat using Gemini LLM and Zep memory.
-    
-    Memory Flow:
-    1. User sends message
-    2. Get context from Supermemory (search based on query)
-    3. Inject context into system prompt
-    4. Gemini generates response
-    5. Store conversation in Zep
+    Agentic Memory Chain using Gemini SDK.
     """
     
     def __init__(
         self,
-        gemini_client: GeminiClient,
-        memory_client: SupermemoryClient,
-        auto_store_memory: bool = True,
+        api_key: Optional[str] = None,
+        model: str = "gemini-2.5-flash",
+        mongo_uri: Optional[str] = None,
+        voyage_api_key: Optional[str] = None,
+        verbose: bool = True
     ):
+        self.verbose = verbose
+        self.model_name = model
+        
+        # 1. Setup Gemini Client
+        google_api_key = api_key or os.environ.get("GEMINI_API_KEY")
+        if not google_api_key:
+            logger.warning("GEMINI_API_KEY missing!")
+            
+        self.client = genai.Client(api_key=google_api_key)
+        
+        # 2. Setup Tools
+        voyage_key = voyage_api_key or os.environ.get("VOYAGE_API_KEY")
+        if not voyage_key:
+            logger.warning("Voyage API Key missing! Embeddings will fail.")
+            
+        # Get Mongo config from Env
+        uri = mongo_uri or os.environ.get("MONGODB_URI")
+        if not uri:
+             uri = "mongodb://localhost:27017"
+        
+        db_name = os.environ.get("MONGODB_DB_NAME", "memory")
+        collection_name = os.environ.get("MONGODB_COLLECTION_NAME", "user-memory")
+
+        # Initialize the global tools
+        # We also pass the same client/model to the tools for internal LLM usage (extraction)
+        init_tools(uri, voyage_key, self.client, db_name, collection_name, model_name=model)
+        
+        # Tool Declarations for Gemini
+        # We pass the functions directly. The SDK inspects them.
+        self.tools = [store_memory_tool, retrieve_memory_tool]
+
+        logger.info(f"MemoryChain (Gemini SDK) initialized. DB: {db_name}.{collection_name}")
+
+    async def chat(self, user_id: str, message: str, chat_history: List[Dict] = None) -> str:
         """
-        Initialize the memory chain.
+        Process a chat message using Gemini with Tools.
         
         Args:
-            gemini_client: Gemini LLM client
-            memory_client: SupermemoryClient
-            auto_store_memory: Automatically store conversations after response
-        """
-        self.llm = gemini_client
-        self.memory = memory_client
-        self.auto_store_memory = auto_store_memory
-        
-        logger.info("MemoryChain initialized (auto_store_memory=%s)", auto_store_memory)
-    
-    async def chat(self, user_id: str, message: str) -> str:
-        """
-        Process a chat message with memory context injection.
-        
-        Flow:
-        1. Search context in Supermemory
-        2. Inject context into prompt
-        3. Gemini generates response
-        4. Store conversation async
-        
-        Args:
-            user_id: User identifier
-            message: User's message
+            user_id: User identifier.
+            message: The user's message.
+            chat_history: List of past messages (optional). 
+                          Expected format: [{"role": "user", "content": "..."}, ...]
+                          or the types.Content format.
         
         Returns:
-            Assistant's response
+            Assistant response string.
         """
-        logger.info("=" * 80)
-        logger.info("MEMORY CHAIN: PROCESSING CHAT MESSAGE")
-        logger.info("=" * 80)
+        logger.info(f"Processing message for user {user_id}")
         
+        # Prepare context/instructions
+        system_instruction = (
+            "You are a helpful assistant with specific long-term memory capabilities. "
+            "You MUST use 'retrieve_memory_tool' to look up information about the user, past conversations, or facts when relevant. "
+            "You MUST use 'store_memory_tool' to save important facts, preferences, or events from the conversation into long-term memory. "
+            "Do not rely only on current context; actively use your memory tools. "
+            f"Current User ID: {user_id}"
+        )
+
+        # Config with Tools
+        # Note: The 'google-genai' SDK allows passing python functions directly in `tools`.
+        config = types.GenerateContentConfig(
+            tools=self.tools,
+            system_instruction=system_instruction,
+            temperature=0.7,
+            automatic_function_calling=dict(disable=False, maximum_remote_calls=5) # Enable auto tool execution
+        )
+        
+        # Build contents
+        contents = []
+        if chat_history:
+             # Convert simple dict history to types.Content if needed, or pass as is if SDK supports it.
+             # Assuming chat_history is list of Content objects or compatible dicts.
+             for msg in chat_history:
+                 role = msg.get("role", "user")
+                 text = msg.get("content", "")
+                 if role == "assistant": role = "model"
+                 contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
+        
+        contents.append(types.Content(role="user", parts=[types.Part.from_text(text=message)]))
+
         try:
-            # ============================================================
-            # STEP 1: LOG THE INCOMING MESSAGE
-            # ============================================================
-            logger.info("[STEP 1/5] RECEIVED USER MESSAGE")
-            logger.info(f"  User ID: {user_id}")
-            logger.info(f"  Message: {message}")
-            logger.info(f"  Message Length: {len(message)} characters")
+            # We use a chat session for convenience if we want to maintain state, 
+            # but here we are stateless per request (using passed history).
+            # generate_content is easier for stateless.
             
-            # ============================================================
-            # STEP 2: SEARCH CONTEXT IN SUPERMEMORY
-            # ============================================================
-            logger.info("[STEP 2/5] SEARCHING CONTEXT IN SUPERMEMORY")
-            context = await self.memory.search_context(user_id, message)
+            # NOTE: 'google-genai' SDK's automatic_function_calling handles the loop!
+            response = await self.client.aio.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=config
+            )
             
-            if context:
-                logger.info(f"  [OK] Context found in Supermemory!")
-                logger.info(f"  Context Length: {len(context)} characters")
-                logger.info("  " + "-" * 60)
-                logger.info("  RELEVANT CONTEXT:")
-                logger.info("  " + "-" * 60)
-                for line in context.split('\n'):
-                    logger.info(f"  | {line}")
-                logger.info("  " + "-" * 60)
-            else:
-                logger.info("  [X] No context available (new user or no history)")
-            
-            # ============================================================
-            # STEP 3: BUILD PROMPT WITH CONTEXT INJECTION
-            # ============================================================
-            logger.info("[STEP 3/5] BUILDING PROMPT WITH CONTEXT INJECTION")
-            
-            if context:
-                system_prompt = f"{SYSTEM_PROMPT}\n\n<USER_CONTEXT>\n{context}\n</USER_CONTEXT>"
-                logger.info(f"  [OK] Context INJECTED into system prompt")
-            else:
-                system_prompt = SYSTEM_PROMPT
-                logger.info(f"  [!] No context to inject (using base prompt only)")
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": message}
-            ]
-            
-            logger.info(f"  System Prompt Length: {len(system_prompt)} characters")
-            logger.info(f"  Total messages to LLM: {len(messages)}")
-            logger.info("  " + "-" * 60)
-            logger.info("  FULL PROMPT BEING SENT TO GEMINI:")
-            logger.info("  " + "-" * 60)
-            for msg in messages:
-                logger.info(f"  [{msg['role'].upper()}]:")
-                for line in msg['content'].split('\n'):
-                    logger.info(f"  | {line}")
-                logger.info("  " + "-" * 40)
-            logger.info("  " + "-" * 60)
-            
-            # ============================================================
-            # STEP 4: CALL GEMINI LLM
-            # ============================================================
-            logger.info("[STEP 4/5] CALLING GEMINI LLM")
-            logger.info(f"  Sending request to Gemini...")
-            
-            start_time = datetime.now()
-            response = self.llm.chat_completion(messages)
-            elapsed = (datetime.now() - start_time).total_seconds()
-            
-            assistant_response = response.choices[0].message.content or ""
-            
-            # Log token usage if available
-            usage = self.llm.get_usage(response)
-            
-            logger.info(f"  [OK] Response received from Gemini!")
-            logger.info(f"  Response Time: {elapsed:.2f}s")
-            logger.info(f"  Token Usage: prompt={usage.get('prompt_tokens', 0)}, completion={usage.get('completion_tokens', 0)}, total={usage.get('total_tokens', 0)}")
-            logger.info(f"  Response Length: {len(assistant_response)} characters")
-            logger.info("  " + "-" * 60)
-            logger.info("  FULL LLM RESPONSE:")
-            logger.info("  " + "-" * 60)
-            for line in assistant_response.split('\n'):
-                logger.info(f"  | {line}")
-            logger.info("  " + "-" * 60)
-            
-            # ============================================================
-            # STEP 5: STORE CONVERSATION IN ZEP
-            # ============================================================
-            if self.auto_store_memory:
-                logger.info("[STEP 5/5] STORING CONVERSATION IN SUPERMEMORY")
-                logger.info("  " + "-" * 60)
-                logger.info("  DATA BEING SENT TO SUPERMEMORY FOR STORAGE:")
-                logger.info("  " + "-" * 60)
-                logger.info(f"  Thread ID: thread_{user_id}")
-                logger.info(f"  [USER MESSAGE]:")
-                for line in message.split('\n'):
-                    logger.info(f"  | {line}")
-                logger.info(f"  [ASSISTANT RESPONSE]:")
-                for line in assistant_response.split('\n'):
-                    logger.info(f"  | {line}")
-                logger.info("  " + "-" * 60)
-                
-                await self.memory.add_messages(
-                    user_id=user_id,
-                    user_message=message,
-                    assistant_response=assistant_response,
-                    return_context=False
-                )
-                
-                logger.info(f"  [OK] Conversation stored in Supermemory")
-            else:
-                logger.info("[STEP 5/5] SKIPPING STORAGE (auto_store_memory=False)")
-            
-            logger.info("=" * 80)
-            logger.info("MEMORY CHAIN: COMPLETED SUCCESSFULLY")
-            logger.info("=" * 80)
-            
-            return assistant_response
+            return response.text
             
         except Exception as e:
-            logger.exception(f"[ERROR] Memory chain failed: {e}")
-            raise
+            logger.error(f"Error during Gemini SDK execution: {e}")
+            return f"Error: {str(e)}"

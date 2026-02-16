@@ -1,7 +1,7 @@
 """
 Document Controller
 Endpoints for document upload and delete.
-Uses Supermemory client.add for business data ingestion.
+Uses MongoMemoryClient for storage and VoyageEmbedder for vectorization.
 """
 
 import logging
@@ -10,29 +10,37 @@ from typing import Optional
 from datetime import datetime
 
 from app.utils.response import success_response, error_response
-from app.memory.supermemory_client import SupermemoryClient
+from app.memory.mongo_client import MongoMemoryClient
+from app.memory.embedding import VoyageEmbedder
 from app.api.document.services.pdf_operation import process_pdf
 
 logger = logging.getLogger("memory_chat.document")
 
 router = APIRouter()
 
-# Memory client instance (set by main.py)
-_memory_client: SupermemoryClient = None
+# Clients (set by main.py)
+_memory_client: MongoMemoryClient = None
+_embedder: VoyageEmbedder = None
 
 
-def set_memory_client(client: SupermemoryClient) -> None:
-    """Set the memory client instance."""
-    global _memory_client
+def set_memory_client(client: MongoMemoryClient, embedder: VoyageEmbedder) -> None:
+    """Set the memory client and embedder instance."""
+    global _memory_client, _embedder
     _memory_client = client
-    logger.info("Memory client set in document controller")
+    _embedder = embedder
+    logger.info("Memory client and embedder set in document controller")
 
 
-def get_memory_client() -> SupermemoryClient:
+def get_memory_client() -> MongoMemoryClient:
     """Get the memory client instance."""
     if _memory_client is None:
         raise RuntimeError("Memory client not initialized")
     return _memory_client
+
+def get_embedder() -> VoyageEmbedder:
+    if _embedder is None:
+        raise RuntimeError("Embedder not initialized")
+    return _embedder
 
 
 def extract_text_from_file(file_id: str, file_bytes: bytes, file_ext: str) -> str:
@@ -69,9 +77,7 @@ async def upload_document(
     file_name: Optional[str] = Form(None),
 ):
     """
-    Upload a document to user's memory via Supermemory.
-    
-    Uses Supermemory add() for business data ingestion.
+    Upload a document to user's memory via MongoDB.
     
     Args:
         file: The file to upload
@@ -96,15 +102,36 @@ async def upload_document(
         content = extract_text_from_file(file_id, file_bytes, file_ext)
         logger.info(f"[UPLOAD] Extracted {len(content)} characters")
         
-        # Get memory client
+        # Get clients
         memory_client = get_memory_client()
+        embedder = get_embedder()
         
-        # Add to Supermemory as business data
-        result = await memory_client.add_business_data(
-            user_id=user_id,
-            data=f"Document: {resolved_file_name}\n\n{content}",
-        )
+        # Embed content
+        # Note: If content is too large, we should split it. 
+        # For this implementation, we assume it's chunked or we just embed the whole thing (limitations apply).
+        # We'll do a simple split or just embed passing the text. Voyage handles some truncation.
+        # Ideally, we should split by 1000-2000 chars.
         
+        # Simple chunking for now (naive)
+        chunks = [content[i:i+4000] for i in range(0, len(content), 4000)]
+        
+        stored_ids = []
+        for i, chunk in enumerate(chunks):
+            embedding = await embedder.embed_query(chunk) # or embed_documents
+            doc_id = memory_client.add_memory(
+                content=chunk,
+                embedding=embedding,
+                user_id=user_id,
+                metadata={
+                    "source": "document",
+                    "filename": resolved_file_name,
+                    "file_id": file_id,
+                    "chunk_index": i
+                }
+            )
+            stored_ids.append(doc_id)
+        
+        result = f"Stored {len(stored_ids)} chunks."
         logger.info(f"[UPLOAD] Storage result: {result}")
         
         return success_response(
@@ -115,7 +142,8 @@ async def upload_document(
                 "file_ext": file_ext,
                 "size_bytes": len(file_bytes),
                 "content_length": len(content),
-                "status": result
+                "status": result,
+                "chunks": len(stored_ids)
             },
             201,
         )
@@ -137,8 +165,6 @@ async def delete_document(
     """
     Delete a document from memory.
     
-    Note: Supermemory may not support direct deletion of individual facts yet.
-    
     Args:
         file_id: File identifier to delete
         user_id: User identifier
@@ -149,9 +175,18 @@ async def delete_document(
     try:
         logger.info(f"[DELETE] Deleting file_id: {file_id}, user: {user_id}")
         
-        # TODO: Check if Zep supports fact deletion
+        client = get_memory_client()
+        # client.collection.delete_many({"metadata.file_id": file_id, "user_id": user_id})
+        # Note: We need to enable delete in MongoMemoryClient or access collection directly.
+        # Accessing collection directly for now as per minimal change strategy.
+        result = client.collection.delete_many({
+            "user_id": user_id,
+            "metadata.file_id": file_id
+        })
+        
         return success_response({
-            "message": "Document deletion not yet supported",
+            "message": "Document deleted",
+            "deleted_count": result.deleted_count,
             "file_id": file_id,
             "user_id": user_id
         })

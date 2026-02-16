@@ -19,7 +19,6 @@ from app.api.chat.services.chat_service import ChatService
 from app.api.document.document_controller import set_memory_client as set_document_memory_client
 from app.memory.memory_chain import MemoryChain
 from app.memory.gemini_client import GeminiClient
-from app.memory.supermemory_client import SupermemoryClient
 from app.route import setup_routes
 
 
@@ -71,15 +70,16 @@ logger = setup_logging()
 # ============================================================================
 
 # Global instances
-_memory_client: SupermemoryClient = None
-_gemini_client: GeminiClient = None
-_memory_chain: MemoryChain = None
-_chat_service: ChatService = None
+_mongo_client = None
+_embedder = None
+_gemini_client = None
+_memory_chain = None
+_chat_service = None
 
 
 async def initialize_services():
     """Initialize all application services."""
-    global _memory_client, _gemini_client, _memory_chain, _chat_service
+    global _mongo_client, _embedder, _gemini_client, _memory_chain, _chat_service
     
     logger.info("Initializing services...")
     
@@ -91,17 +91,29 @@ async def initialize_services():
             model=Config.GEMINI_MODEL,
         )
         
-        # Initialize Supermemory client
-        logger.info("Initializing Supermemory client")
-        _memory_client = SupermemoryClient(
-            api_key=Config.SUPERMEMORY_API_KEY,
+        # Initialize MongoDB Client
+        logger.info("Initializing MongoDB Client")
+        from app.memory.mongo_client import MongoMemoryClient
+        _mongo_client = MongoMemoryClient(
+             uri=os.environ.get("MONGODB_URI", "mongodb://localhost:27017"),
+             db_name=os.environ.get("MONGODB_DB_NAME", "memory"),
+             collection_name=os.environ.get("MONGODB_COLLECTION_NAME", "user-memory")
         )
+        
+        # Initialize Voyage Embedder
+        logger.info("Initializing Voyage Embedder")
+        from app.memory.embedding import VoyageEmbedder
+        _embedder = VoyageEmbedder(
+            api_key=os.environ.get("VOYAGE_API_KEY")
+        )
+
         
         # Initialize memory chain
         logger.info("Initializing memory chain")
+        # MemoryChain now initializes its own tools/clients internally based on env vars
         _memory_chain = MemoryChain(
-            gemini_client=_gemini_client,
-            memory_client=_memory_client,
+            api_key=Config.GEMINI_API_KEY,
+            model=Config.GEMINI_MODEL
         )
         
         # Initialize chat service
@@ -111,8 +123,8 @@ async def initialize_services():
         # Set service in controller
         set_chat_service(_chat_service)
         
-        # Set memory client in document controller
-        set_document_memory_client(_memory_client)
+        # Set memory client & embedder in document controller
+        set_document_memory_client(_mongo_client, _embedder)
         
         logger.info("All services initialized successfully")
         
@@ -123,13 +135,13 @@ async def initialize_services():
 
 async def shutdown_services():
     """Cleanup services on shutdown."""
-    global _memory_client
+    global _mongo_client
     
     logger.info("Shutting down services...")
     
     try:
-        if _memory_client:
-            await _memory_client.close()
+        if _mongo_client:
+            _mongo_client.close()
             logger.info("Memory client closed")
     except Exception as e:
         logger.exception(f"Error during shutdown: {e}")
@@ -155,7 +167,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Memory Chat API",
-    description="Chat API with Supermemory",
+    description="Chat API with MongoDB Memory",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -197,7 +209,7 @@ async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "memory": "supermemory",
+        "memory": "mongodb",
         "llm": "gemini",
     }
 
@@ -208,5 +220,5 @@ async def root():
     return {
         "message": "Memory Chat API",
         "version": "2.0.0",
-        "memory_backend": "Supermemory",
+        "memory_backend": "MongoDB",
     }
