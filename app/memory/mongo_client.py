@@ -22,7 +22,7 @@ class MongoMemoryClient:
     Supports vector search using numpy for similarity (compatible with standard Mongo).
     """
     
-    def __init__(self, uri: str = "mongodb://localhost:27017", db_name: str = "memory", collection_name: str = "user-memory"):
+    def __init__(self, uri: str = "", db_name: str = "memory", collection_name: str = "user-memory"):
         """
         Initialize MongoDB client.
         
@@ -34,9 +34,11 @@ class MongoMemoryClient:
         self.client = MongoClient(uri)
         self.db = self.client[db_name]
         self.collection: Collection = self.db[collection_name]
+        self.chat_collection: Collection = self.db["chat_history"]
         
         # Ensure index on user_id for faster filtering
         self.collection.create_index("user_id")
+        self.chat_collection.create_index([("user_id", 1), ("timestamp", -1)])
         
         logger.info(f"Connected to MongoDB: {db_name}.{collection_name}")
 
@@ -117,3 +119,43 @@ class MongoMemoryClient:
 
     def close(self):
         self.client.close()
+
+    # --- Chat History Management ---
+
+    def add_chat_history(self, user_id: str, role: str, content: str) -> str:
+        """
+        Add a chat message to the history.
+        
+        Args:
+            user_id: User identifier
+            role: 'user' or 'model' (or 'assistant')
+            content: Message content
+            
+        Returns:
+            Inserted document ID
+        """
+        document = {
+            "user_id": user_id,
+            "role": role,
+            "content": content,
+            "timestamp": datetime.utcnow()
+        }
+        result = self.chat_collection.insert_one(document)
+        return str(result.inserted_id)
+
+    def get_chat_history(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get the most recent chat history for a user.
+        
+        Args:
+            user_id: User identifier
+            limit: Number of messages to retrieve
+            
+        Returns:
+            List of message documents, sorted by timestamp (oldest first)
+        """
+        cursor = self.chat_collection.find({"user_id": user_id}).sort("timestamp", -1).limit(limit)
+        # Sort back to chronological order
+        messages = list(cursor)
+        messages.sort(key=lambda x: x["timestamp"])
+        return messages

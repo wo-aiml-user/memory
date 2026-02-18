@@ -33,7 +33,7 @@ def get_chat_service() -> ChatService:
     return _chat_service
 
 
-@router.post("", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
     payload: ChatRequest,
     background_tasks: BackgroundTasks

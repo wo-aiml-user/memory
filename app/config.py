@@ -16,13 +16,12 @@ class Config:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     
-    # Supermemory Configuration
-    SUPERMEMORY_API_KEY: str = os.getenv("SUPERMEMORY_API_KEY", "")
+    # Supermemory Configuration - REMOVED
+    # SUPERMEMORY_API_KEY: str = os.getenv("SUPERMEMORY_API_KEY", "")
     
-    # Voyage AI Configuration (Deprecated/Unused with Supermemory)
-    # VOYAGE_API_KEY: str = os.getenv("VOYAGE_API_KEY", "")
-    # VOYAGE_EMBED_MODEL: str = os.getenv("VOYAGE_EMBED_MODEL", "voyage-3-large")
-    # VOYAGE_RERANK_MODEL: str = os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5")
+    # Embedding & Database Configuration
+    VOYAGE_API_KEY: str = os.getenv("VOYAGE_API_KEY", "")
+    MONGODB_URI: str = os.getenv("MONGODB_URI", "")
     
     # Server Configuration
     HOST: str = os.getenv("HOST", "0.0.0.0")
@@ -43,7 +42,8 @@ class Config:
         """Validate required configuration."""
         required = [
             ("GEMINI_API_KEY", cls.GEMINI_API_KEY),
-            ("SUPERMEMORY_API_KEY", cls.SUPERMEMORY_API_KEY),
+            ("VOYAGE_API_KEY", cls.VOYAGE_API_KEY),
+            ("MONGODB_URI", cls.MONGODB_URI),
         ]
         
         missing = [name for name, value in required if not value]

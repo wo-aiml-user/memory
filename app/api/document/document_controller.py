@@ -105,14 +105,6 @@ async def upload_document(
         # Get clients
         memory_client = get_memory_client()
         embedder = get_embedder()
-        
-        # Embed content
-        # Note: If content is too large, we should split it. 
-        # For this implementation, we assume it's chunked or we just embed the whole thing (limitations apply).
-        # We'll do a simple split or just embed passing the text. Voyage handles some truncation.
-        # Ideally, we should split by 1000-2000 chars.
-        
-        # Simple chunking for now (naive)
         chunks = [content[i:i+4000] for i in range(0, len(content), 4000)]
         
         stored_ids = []
@@ -176,9 +168,6 @@ async def delete_document(
         logger.info(f"[DELETE] Deleting file_id: {file_id}, user: {user_id}")
         
         client = get_memory_client()
-        # client.collection.delete_many({"metadata.file_id": file_id, "user_id": user_id})
-        # Note: We need to enable delete in MongoMemoryClient or access collection directly.
-        # Accessing collection directly for now as per minimal change strategy.
         result = client.collection.delete_many({
             "user_id": user_id,
             "metadata.file_id": file_id

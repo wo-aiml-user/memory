@@ -53,4 +53,4 @@ def setup_routes(app: FastAPI):
 
     app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
     app.include_router(document_router, prefix="/api/document", tags=["Document"])
-    app.include_router(chat_router, prefix="/api/chat", tags=["Chat"])
+    app.include_router(chat_router, prefix="/api", tags=["Chat"])
