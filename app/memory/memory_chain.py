@@ -66,48 +66,38 @@ class MemoryChain:
         Returns:
             Assistant's response
         """
-        logger.info("=" * 80)
-        logger.info("MEMORY CHAIN: PROCESSING CHAT MESSAGE")
-        logger.info("=" * 80)
-        
+        logger.info("MEMORY CHAIN: PROCESSING CHAT MESSAGE")        
         try:
             # ============================================================
             # STEP 1: LOG THE INCOMING MESSAGE
             # ============================================================
-            logger.info("[STEP 1/5] RECEIVED USER MESSAGE")
             logger.info(f"  User ID: {user_id}")
-            logger.info(f"  Message: {message}")
-            logger.info(f"  Message Length: {len(message)} characters")
-            
+            logger.info(f"  Message: {message}")            
             # ============================================================
             # STEP 2: GET CONTEXT FROM ZEP
             # ============================================================
-            logger.info("[STEP 2/5] RETRIEVING CONTEXT FROM ZEP")
             context = await self.memory.get_context(user_id)
             
             if context:
-                logger.info(f"  [OK] Context retrieved from Zep!")
+                logger.info(f"  Context retrieved from Zep!")
                 logger.info(f"  Context Length: {len(context)} characters")
-                logger.info("  " + "-" * 60)
                 logger.info("  FULL CONTEXT FROM ZEP:")
-                logger.info("  " + "-" * 60)
                 for line in context.split('\n'):
                     logger.info(f"  | {line}")
-                logger.info("  " + "-" * 60)
             else:
-                logger.info("  [X] No context available (new user or no history)")
+                logger.info("No context available (new user or no history)")
             
             # ============================================================
             # STEP 3: BUILD PROMPT WITH CONTEXT INJECTION
             # ============================================================
-            logger.info("[STEP 3/5] BUILDING PROMPT WITH CONTEXT INJECTION")
+            logger.info("BUILDING PROMPT WITH CONTEXT INJECTION")
             
             if context:
                 system_prompt = f"{SYSTEM_PROMPT}\n\n<USER_CONTEXT>\n{context}\n</USER_CONTEXT>"
-                logger.info(f"  [OK] Context INJECTED into system prompt")
+                logger.info(f" Context INJECTED into system prompt")
             else:
                 system_prompt = SYSTEM_PROMPT
-                logger.info(f"  [!] No context to inject (using base prompt only)")
+                logger.info(f" No context to inject (using base prompt only)")
             
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -116,20 +106,15 @@ class MemoryChain:
             
             logger.info(f"  System Prompt Length: {len(system_prompt)} characters")
             logger.info(f"  Total messages to LLM: {len(messages)}")
-            logger.info("  " + "-" * 60)
             logger.info("  FULL PROMPT BEING SENT TO GEMINI:")
-            logger.info("  " + "-" * 60)
             for msg in messages:
                 logger.info(f"  [{msg['role'].upper()}]:")
                 for line in msg['content'].split('\n'):
                     logger.info(f"  | {line}")
-                logger.info("  " + "-" * 40)
-            logger.info("  " + "-" * 60)
             
             # ============================================================
             # STEP 4: CALL GEMINI LLM
             # ============================================================
-            logger.info("[STEP 4/5] CALLING GEMINI LLM")
             logger.info(f"  Sending request to Gemini...")
             
             start_time = datetime.now()
@@ -141,25 +126,19 @@ class MemoryChain:
             # Log token usage if available
             usage = self.llm.get_usage(response)
             
-            logger.info(f"  [OK] Response received from Gemini!")
+            logger.info(f"  Response received from Gemini!")
             logger.info(f"  Response Time: {elapsed:.2f}s")
             logger.info(f"  Token Usage: prompt={usage.get('prompt_tokens', 0)}, completion={usage.get('completion_tokens', 0)}, total={usage.get('total_tokens', 0)}")
             logger.info(f"  Response Length: {len(assistant_response)} characters")
-            logger.info("  " + "-" * 60)
             logger.info("  FULL LLM RESPONSE:")
-            logger.info("  " + "-" * 60)
             for line in assistant_response.split('\n'):
                 logger.info(f"  | {line}")
-            logger.info("  " + "-" * 60)
             
             # ============================================================
             # STEP 5: STORE CONVERSATION IN ZEP
             # ============================================================
             if self.auto_store_memory:
-                logger.info("[STEP 5/5] STORING CONVERSATION IN ZEP")
-                logger.info("  " + "-" * 60)
-                logger.info("  DATA BEING SENT TO ZEP FOR STORAGE:")
-                logger.info("  " + "-" * 60)
+                logger.info("STORING CONVERSATION IN ZEP")
                 logger.info(f"  Thread ID: thread_{user_id}")
                 logger.info(f"  [USER MESSAGE]:")
                 for line in message.split('\n'):
@@ -167,7 +146,6 @@ class MemoryChain:
                 logger.info(f"  [ASSISTANT RESPONSE]:")
                 for line in assistant_response.split('\n'):
                     logger.info(f"  | {line}")
-                logger.info("  " + "-" * 60)
                 
                 await self.memory.add_messages(
                     user_id=user_id,
@@ -176,13 +154,11 @@ class MemoryChain:
                     return_context=False
                 )
                 
-                logger.info(f"  [OK] Conversation stored in Zep - will be processed for facts/entities")
+                logger.info(f"  Conversation stored in Zep - will be processed for facts/entities")
             else:
-                logger.info("[STEP 5/5] SKIPPING STORAGE (auto_store_memory=False)")
+                logger.info("SKIPPING STORAGE (auto_store_memory=False)")
             
-            logger.info("=" * 80)
             logger.info("MEMORY CHAIN: COMPLETED SUCCESSFULLY")
-            logger.info("=" * 80)
             
             return assistant_response
             

@@ -249,6 +249,7 @@ class ZepMemoryClient:
                 context = user_context.context
                 logger.info(f"[ZEP RETRIEVE] [OK] Context retrieved from Zep!")
                 logger.info(f"[ZEP RETRIEVE] Context length: {len(context)} characters")
+                logger.info(f"[ZEP RETRIEVE] Context: {context}")
                 logger.info("-" * 50)
                 logger.info("[ZEP RETRIEVE] FULL CONTEXT DATA FROM ZEP:")
                 logger.info("-" * 50)

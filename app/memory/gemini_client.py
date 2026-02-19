@@ -44,13 +44,13 @@ class GeminiClient:
     Provides OpenAI-compatible interface for easy migration.
     """
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-3-pro-preview"):
         """
         Initialize Gemini client.
         
         Args:
             api_key: Gemini API key (defaults to GEMINI_API_KEY env var)
-            model: Model name to use (default: gemini-2.5-flash)
+            model: Model name to use (default: gemini-3-pro-preview)
         """
         api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not api_key:
