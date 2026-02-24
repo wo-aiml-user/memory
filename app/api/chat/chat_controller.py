@@ -7,7 +7,7 @@ import logging
 import uuid
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 
-from app.api.chat.models.chat_model import ChatRequest, ChatResponse, ChatStatus
+from app.api.chat.models.chat_model import ChatRequest, ChatResponse, ChatStatus, TokenUsage
 from app.api.chat.services.chat_service import ChatService
 
 logger = logging.getLogger("memory_chat.controller")
@@ -46,7 +46,7 @@ async def chat_endpoint(
         background_tasks: FastAPI background tasks
     
     Returns:
-        ChatResponse with the assistant's response
+        ChatResponse with the assistant's response and token usage
     """
     try:
         logger.info(f"[/chat] Received request from user: {payload.user_id}")
@@ -63,11 +63,19 @@ async def chat_endpoint(
         
         logger.info(f"[/chat] Completed for user: {payload.user_id}")
         
+        # Build token_usage model if available
+        token_usage = None
+        if result.token_usage:
+            token_usage = TokenUsage(
+                prompt_tokens=result.token_usage.get("prompt_tokens", 0),
+                completion_tokens=result.token_usage.get("completion_tokens", 0),
+                total_tokens=result.token_usage.get("total_tokens", 0),
+            )
+        
         return ChatResponse(
             user_id=result.user_id,
             response=result.response,
-            status=result.status,
-            error=result.error,
+            token_usage=token_usage,
         )
         
     except HTTPException:

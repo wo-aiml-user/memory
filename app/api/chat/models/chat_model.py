@@ -15,6 +15,13 @@ class ChatStatus(str, Enum):
     ERROR = "error"
 
 
+class TokenUsage(BaseModel):
+    """Token usage information from the LLM."""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
     user_id: str
@@ -25,8 +32,7 @@ class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
     user_id: str
     response: str
-    status: ChatStatus = ChatStatus.COMPLETED
-    error: Optional[str] = None
+    token_usage: Optional[TokenUsage] = None
 
 
 class MemoryResult(BaseModel):

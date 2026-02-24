@@ -147,9 +147,7 @@ class ZepMemoryClient:
         Returns:
             Context block if return_context=True, else None
         """
-        logger.info("=" * 70)
         logger.info("[ZEP STORE] ADDING MESSAGES TO ZEP CLOUD")
-        logger.info("=" * 70)
         
         try:
             # Ensure thread exists
@@ -159,16 +157,13 @@ class ZepMemoryClient:
             logger.info(f"[ZEP STORE] User ID: {user_id}")
             
             # Log full message content
-            logger.info("-" * 50)
             logger.info("[ZEP STORE] MESSAGE PAYLOAD TO ZEP:")
-            logger.info("-" * 50)
             logger.info("[ZEP STORE] Message 1 (role=user):")
             for line in user_message.split('\n'):
                 logger.info(f"  | {line}")
             logger.info("[ZEP STORE] Message 2 (role=assistant):")
             for line in assistant_response.split('\n'):
                 logger.info(f"  | {line}")
-            logger.info("-" * 50)
             
             messages = [
                 Message(

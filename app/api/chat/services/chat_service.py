@@ -5,7 +5,7 @@ Async chat service with background processing.
 
 import logging
 import asyncio
-from typing import Optional
+from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -22,6 +22,7 @@ class ChatResult:
     response: str
     status: ChatStatus
     error: Optional[str] = None
+    token_usage: Optional[Dict[str, int]] = None
     timestamp: datetime = field(default_factory=datetime.now)
 
 
@@ -52,19 +53,20 @@ class ChatService:
             message: User's message
         
         Returns:
-            ChatResult with response
+            ChatResult with response and token usage
         """
         try:
             logger.info(f"[process_chat] Starting for user: {user_id}")
             logger.debug(f"[process_chat] Message: {message}")
             
-            # Call the memory chain
-            response = await self.memory_chain.chat(user_id, message)
+            # Call the memory chain — returns (response_text, usage_dict)
+            response, usage = await self.memory_chain.chat(user_id, message)
             
             result = ChatResult(
                 user_id=user_id,
                 response=response,
                 status=ChatStatus.COMPLETED,
+                token_usage=usage,
             )
             
             logger.info(f"[process_chat] Completed for user: {user_id}")

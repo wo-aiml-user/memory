@@ -7,7 +7,7 @@ Flow: User Message → Get Context from Zep → Inject into Prompt → Gemini �
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any, Tuple
 from datetime import datetime
 
 from .gemini_client import GeminiClient
@@ -49,7 +49,7 @@ class MemoryChain:
         
         logger.info("MemoryChain initialized (auto_store_memory=%s)", auto_store_memory)
     
-    async def chat(self, user_id: str, message: str) -> str:
+    async def chat(self, user_id: str, message: str) -> Tuple[str, Dict[str, int]]:
         """
         Process a chat message with memory context injection.
         
@@ -64,7 +64,7 @@ class MemoryChain:
             message: User's message
         
         Returns:
-            Assistant's response
+            Tuple of (assistant_response, token_usage_dict)
         """
         logger.info("MEMORY CHAIN: PROCESSING CHAT MESSAGE")        
         try:
@@ -123,7 +123,7 @@ class MemoryChain:
             
             assistant_response = response.choices[0].message.content or ""
             
-            # Log token usage if available
+            # Extract token usage
             usage = self.llm.get_usage(response)
             
             logger.info(f"  Response received from Gemini!")
@@ -160,7 +160,7 @@ class MemoryChain:
             
             logger.info("MEMORY CHAIN: COMPLETED SUCCESSFULLY")
             
-            return assistant_response
+            return assistant_response, usage
             
         except Exception as e:
             logger.exception(f"[ERROR] Memory chain failed: {e}")
