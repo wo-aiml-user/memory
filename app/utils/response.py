@@ -4,7 +4,7 @@ Standard response formatting for API endpoints.
 """
 
 from fastapi.responses import JSONResponse
-from typing import Any, Optional
+from typing import Any
 
 
 def success_response(data: Any = None, status_code: int = 200) -> JSONResponse:

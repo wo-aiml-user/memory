@@ -14,3 +14,6 @@ uploads/
 .qoder
 rag_worker.lock
 node_modules
+test.ipynb
+memu_memory/
+workspace/

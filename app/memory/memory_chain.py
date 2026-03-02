@@ -1,218 +1,198 @@
 """
 Memory Chain
-Main orchestration logic for memory-enhanced chat using Gemini SDK and Manual Tool Execution.
-Follows the official "Function Calling" steps:
-1. Define declarations (Tools).
-2. Call model with declarations.
-3. Execute function code.
-4. Send result back to model.
+Gemini SDK manual function-calling loop with file-based memory architecture.
 """
 
 import logging
 import os
-import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Dict, List, Optional
 
 from google import genai
 from google.genai import types
 
-# Import tools and init
-from .memory_tools import init_tools, retrieve_memory_tool, save_chat_message, check_and_store_memory
+from .memory_tools import (
+    append_chat_log,
+    get_memory_tool,
+    get_startup_context,
+    init_tools,
+    write_memory_tool,
+)
 
 logger = logging.getLogger("memory_chat.chain")
 
+
 class MemoryChain:
     """
-    Agentic Memory Chain using Gemini SDK with Manual Function Calling Loop.
+    Memory-aware chat chain with file-based persistent memory.
+
+    Startup memory retrieval:
+    - workspace/MEMORY.md
+    - workspace/memory/<today>.md
+    - workspace/memory/<yesterday>.md
     """
-    
+
     def __init__(
         self,
         api_key: Optional[str] = None,
         model: str = "gemini-2.5-flash",
-        mongo_uri: Optional[str] = None,
         voyage_api_key: Optional[str] = None,
-        verbose: bool = True
+        verbose: bool = True,
     ):
         self.verbose = verbose
         self.model_name = model
-        
-        # 1. Setup Gemini Client
+        self._session_bootstrapped_users: set[str] = set()
+
         google_api_key = api_key or os.environ.get("GEMINI_API_KEY")
         if not google_api_key:
-            logger.warning("GEMINI_API_KEY missing!")
-            
+            logger.warning("GEMINI_API_KEY missing")
         self.client = genai.Client(api_key=google_api_key)
-        
-        # 2. Setup Tools
+
         voyage_key = voyage_api_key or os.environ.get("VOYAGE_API_KEY")
-        if not voyage_key:
-            logger.warning("Voyage API Key missing! Embeddings will fail.")
-            
-        # Get Mongo config from Env
-        uri = mongo_uri or os.environ.get("MONGODB_URI")
-        
-        db_name = os.environ.get("MONGODB_DB_NAME", "memory")
-        collection_name = os.environ.get("MONGODB_COLLECTION_NAME", "user-memory")
+        workspace_dir = os.environ.get("MEMORY_WORKSPACE_DIR", "workspace")
+        assistant_id = os.environ.get("MEMORY_ASSISTANT_ID", "main")
 
-        # Initialize the global tools
-        init_tools(uri, voyage_key, self.client, db_name, collection_name, model_name=model)
+        # Init file-based memory backend
+        init_tools(voyage_key, workspace_dir=workspace_dir, assistant_id=assistant_id)
 
-        self.tools_list = [retrieve_memory_tool]
-        
-        # Create a mapping for execution (Step 3)
+        self.tools_list = [get_memory_tool, write_memory_tool]
         self.tools_map = {
-            "retrieve_memory_tool": retrieve_memory_tool
+            "get_memory_tool": get_memory_tool,
+            "write_memory_tool": write_memory_tool,
         }
 
-        logger.info(f"MemoryChain (Gemini SDK Manual Loop) initialized. DB: {db_name}.{collection_name}")
+        logger.info("MemoryChain initialized with file memory workspace: %s", workspace_dir)
 
     async def chat(self, user_id: str, message: str, chat_history: List[Dict] = None) -> str:
         """
-        Process a chat message using the Manual Function Calling Loop.
-        
-        Args:
-            user_id: User identifier.
-            message: The user's message.
-            chat_history: List of past messages.
-        
-        Returns:
-            Assistant response string.
+        Process a chat message using manual function-calling.
         """
-        logger.info(f"Processing message for user {user_id}")
-        
-        # --- 1. Auto-Save User Message ---
-        await save_chat_message(user_id, "user", message)
-        
+        logger.info("[CHAIN_EVENT] chat start user_id=%s message=%s", user_id, message)
+        logger.info("[CHAIN_EVENT] incoming chat_history_count=%s", len(chat_history) if chat_history else 0)
 
-        store_result = await check_and_store_memory(user_id)
-        if "Triggering memory storage" in str(store_result):
-             logger.info(f"Memory update triggered: {store_result}")
+        await append_chat_log(user_id, "user", message)
 
-        # System Instruction
+        startup_context = ""
+        if user_id not in self._session_bootstrapped_users:
+            logger.info("[CHAIN_EVENT] startup context retrieval triggered user_id=%s", user_id)
+            startup_context = await get_startup_context(user_id=user_id, query=message, top_k=4)
+            self._session_bootstrapped_users.add(user_id)
+        else:
+            logger.info("[CHAIN_EVENT] startup context retrieval skipped already_bootstrapped user_id=%s", user_id)
+
         system_instruction = (
-            "You are a helpful assistant with a distinct personality. "
-            "You have access to long-term memory tools. "
-            "Whenever relevant, use 'retrieve_memory_tool' to recall past user details. "
-            "Do NOT try to store memories yourself; this is done automatically. "
-            f"Current User ID: {user_id}"
+            "You are a helpful assistant with long-term memory tools.\n"
+            "Use get_memory_tool(query, user_id, scope='all') to recall context.\n"
+            "Use write_memory_tool(content, user_id, memory_type, topic) only for important durable facts.\n"
+            "Memory types: daily, projects, curated.\n"
+            f"Current user_id: {user_id}\n"
         )
 
-        # Config (Step 2: Call model with function declarations)
+        if startup_context and not startup_context.startswith("No relevant memory found"):
+            system_instruction += f"\nStartup memory context:\n{startup_context}\n"
+            logger.info("[CHAIN_PROMPT] startup context injected user_id=%s context=%s", user_id, startup_context)
+        else:
+            logger.info("[CHAIN_PROMPT] no startup context injected user_id=%s", user_id)
+
+        logger.info("[CHAIN_PROMPT] final system instruction user_id=%s prompt=%s", user_id, system_instruction)
+
         config = types.GenerateContentConfig(
             tools=self.tools_list,
             system_instruction=system_instruction,
-            temperature=0.7,
-            # automatic_function_calling=dict(disable=False) # DISABLED for manual loop
+            temperature=0.6,
         )
-        
-        # Build Initial Context
-        contents = []
+
+        contents: List[types.Content] = []
         if chat_history:
-             for msg in chat_history:
-                 role = msg.get("role", "user")
-                 text = msg.get("content", "")
-                 if role == "assistant": role = "model"
-                 contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
-        
+            for msg in chat_history:
+                role = msg.get("role", "user")
+                text = msg.get("content", "")
+                if role == "assistant":
+                    role = "model"
+                contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
+
         contents.append(types.Content(role="user", parts=[types.Part.from_text(text=message)]))
-        
+        logger.info("[CHAIN_EVENT] initial contents count=%s user_id=%s", len(contents), user_id)
+
         try:
-            # === Manual Function Calling Loop ===
-            
-            # Initial Call
+            logger.info("[CHAIN_MODEL] first model call user_id=%s model=%s", user_id, self.model_name)
             response = await self.client.aio.models.generate_content(
                 model=self.model_name,
                 contents=contents,
-                config=config
+                config=config,
             )
-            
-            # Use a loop to handle potential chained calls (though usually 1 turn is enough)
-            max_turns = 5
+
             final_response_text = ""
-            
-            for _ in range(max_turns):
-                
-                # Check for function calls (Step 3: Execute function code)
+            max_turns = 5
+
+            for turn in range(1, max_turns + 1):
+                logger.info("[CHAIN_LOOP] turn=%s user_id=%s", turn, user_id)
                 function_calls = response.function_calls
-                
-                if function_calls:
-                    if self.verbose:
-                        logger.info(f"Function Call identified: {function_calls}")
-                    
-                    # Store models response (the call) in history for the next turn
-                    contents.append(response.candidates[0].content)
-                    
-                    # Execute all calls in this turn
-                    function_responses_parts = []
-                    
-                    for call in function_calls:
-                        func_name = call.name
-                        func_args = call.args
-                        
-                        tool_func = self.tools_map.get(func_name)
-                        
-                        if tool_func:
-                            try:
-                                print(f"\n[TOOL CALL] Executing: {func_name}")
-                                print(f"[TOOL ARGS] {func_args}")
-                                logger.info(f"Executing {func_name} with args: {func_args}")
-                                    
-                                # Execute (Async)
-                                result = await tool_func(**func_args)
-                                
-                                print(f"[TOOL RESULT] {result}\n")
-                                logger.info(f"Tool Result: {result}")
-                                
-                                # Create Function Response Part
-                                function_responses_parts.append(
-                                    types.Part.from_function_response(
-                                        name=func_name,
-                                        response={"result": result}
-                                    )
-                                )
-                                
-                            except Exception as e:
-                                logger.error(f"Error executing tool {func_name}: {e}")
-                                function_responses_parts.append(
-                                    types.Part.from_function_response(
-                                        name=func_name,
-                                        response={"error": str(e)}
-                                    )
-                                )
-                        else:
-                             # Tool not found
-                             function_responses_parts.append(
-                                types.Part.from_function_response(
-                                    name=func_name,
-                                    response={"error": "Tool not found"}
-                                )
-                            )
-
-                    # Step 4: Create user friendly response with function result and call the model again
-                    # Append function responses to contents
-                    contents.append(types.Content(role="tool", parts=function_responses_parts))
-                    
-                    # Call model again
-                    response = await self.client.aio.models.generate_content(
-                        model=self.model_name,
-                        contents=contents,
-                        config=config
-                    )
-                    
-                else:
-                    # No function calls, just text
-                    final_response_text = response.text
+                if not function_calls:
+                    final_response_text = response.text or ""
+                    logger.info("[CHAIN_MODEL] no function calls turn=%s response=%s", turn, final_response_text)
                     break
-            
-            if not final_response_text:
-                final_response_text = response.text
 
-            # --- 3. Auto-Save Assistant Response ---
-            await save_chat_message(user_id, "model", final_response_text)
-            
+                if self.verbose:
+                    logger.info("[CHAIN_TOOL] function calls identified turn=%s calls=%s", turn, function_calls)
+
+                contents.append(response.candidates[0].content)
+                function_responses_parts = []
+
+                for call in function_calls:
+                    func_name = call.name
+                    func_args = dict(call.args or {})
+                    func_args.setdefault("user_id", user_id)
+                    logger.info("[CHAIN_TOOL] invoke name=%s args=%s", func_name, func_args)
+
+                    tool_func = self.tools_map.get(func_name)
+                    if not tool_func:
+                        logger.warning("[CHAIN_TOOL] missing tool name=%s", func_name)
+                        function_responses_parts.append(
+                            types.Part.from_function_response(
+                                name=func_name,
+                                response={"error": "Tool not found"},
+                            )
+                        )
+                        continue
+
+                    try:
+                        result = await tool_func(**func_args)
+                        logger.info("[CHAIN_TOOL] result name=%s result=%s", func_name, result)
+                        function_responses_parts.append(
+                            types.Part.from_function_response(
+                                name=func_name,
+                                response={"result": result},
+                            )
+                        )
+                    except Exception as e:
+                        logger.error("[CHAIN_TOOL] error name=%s error=%s", func_name, e)
+                        function_responses_parts.append(
+                            types.Part.from_function_response(
+                                name=func_name,
+                                response={"error": str(e)},
+                            )
+                        )
+
+                contents.append(types.Content(role="tool", parts=function_responses_parts))
+                logger.info(
+                    "[CHAIN_MODEL] follow-up model call after tools turn=%s tool_response_count=%s",
+                    turn,
+                    len(function_responses_parts),
+                )
+                response = await self.client.aio.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                    config=config,
+                )
+
+            if not final_response_text:
+                final_response_text = response.text or ""
+                logger.info("[CHAIN_MODEL] final response fallback user_id=%s response=%s", user_id, final_response_text)
+
+            await append_chat_log(user_id, "assistant", final_response_text)
+            logger.info("[CHAIN_EVENT] chat complete user_id=%s response=%s", user_id, final_response_text)
             return final_response_text
-            
+
         except Exception as e:
-            logger.error(f"Error during Gemini SDK execution: {e}")
-            return f"Error: {str(e)}"
+            logger.error("[CHAIN_EVENT] chat error user_id=%s error=%s", user_id, e)
+            return f"Error: {e}"

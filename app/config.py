@@ -25,7 +25,7 @@ class Config:
     
     # Server Configuration
     HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", "8000"))
+    PORT: int = int(os.getenv("PORT", "5000"))
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     
     # JWT Configuration

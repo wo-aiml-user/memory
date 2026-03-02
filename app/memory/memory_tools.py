@@ -1,161 +1,175 @@
 """
 Memory Tools
-Tools for updating and retrieving memories.
-Refactored to be used with Gemini SDK directly (no LangChain).
+Agent-facing tools for file-based memory:
+- write_memory_tool
+- get_memory_tool
 """
 
 import logging
-from typing import List, Optional, Dict, Any
+import os
+from typing import Optional
 
-# We still need the clients
-from .mongo_client import MongoMemoryClient
 from .embedding import VoyageEmbedder
-from google import genai
-from google.genai import types
+from .file_memory_store import FileMemoryStore
 
 logger = logging.getLogger("memory_chat.tools")
 
-# Global instances
-_mongo_client: Optional[MongoMemoryClient] = None
-_embedder: Optional[VoyageEmbedder] = None
-_genai_client: Optional[genai.Client] = None
-_model_name: str = "gemini-2.5-flash"
+_memory_store: Optional[FileMemoryStore] = None
 
-def init_tools(mongo_uri: str, voyage_api_key: str, genai_client: genai.Client, db_name: str = "memory", collection_name: str = "user-memory", model_name: str = "gemini-2.5-flash"):
-    """Initialize the tools with necessary clients."""
-    global _mongo_client, _embedder, _genai_client, _model_name
-    _mongo_client = MongoMemoryClient(uri=mongo_uri, db_name=db_name, collection_name=collection_name)
-    _embedder = VoyageEmbedder(api_key=voyage_api_key)
-    _genai_client = genai_client
-    _model_name = model_name
-    logger.info(f"Memory tools initialized for {db_name}.{collection_name}")
 
-async def store_memory_tool(conversation_history: str, user_id: str) -> str:
+def init_tools(
+    voyage_api_key: Optional[str],
+    workspace_dir: str = "workspace",
+    assistant_id: str = "main",
+) -> None:
+    """Initialize file-memory tool backend."""
+    global _memory_store
+    embedder = None
+    logger.info(
+        "[TOOL_INIT] init_tools called workspace_dir=%s assistant_id=%s voyage_key_present=%s",
+        workspace_dir,
+        assistant_id,
+        bool(voyage_api_key),
+    )
+
+    if voyage_api_key:
+        try:
+            embedder = VoyageEmbedder(api_key=voyage_api_key)
+            logger.info("Memory tools using semantic retrieval with Voyage embeddings")
+        except Exception as e:
+            logger.warning("Failed to initialize Voyage embedder. Semantic retrieval will be unavailable: %s", e)
+    else:
+        logger.warning("VOYAGE_API_KEY missing. Semantic retrieval will be unavailable.")
+
+    _memory_store = FileMemoryStore(
+        base_dir=workspace_dir,
+        assistant_id=assistant_id,
+        embedder=embedder,
+    )
+    logger.info("[TOOL_INIT] file memory tools initialized workspace_dir=%s", workspace_dir)
+
+
+async def write_memory_tool(
+    content: str,
+    user_id: str,
+    memory_type: str = "daily",
+    topic: str = "general",
+) -> str:
     """
-    Stores relevant information from the conversation history into long-term memory.
-    Call this when the user mentions new preferences, facts, or important details.
-    
+    Write new memory into the file-based memory system.
+
     Args:
-        conversation_history: The recent conversation text or specific facts to store.
-        user_id: The ID of the user.
+        content: The memory content to save.
+        user_id: Current user id.
+        memory_type: daily | projects | curated
+        topic: Topic label for organization.
     """
-    if not _mongo_client or not _embedder or not _genai_client:
+    if _memory_store is None:
+        return "Error: Memory tools not initialized."
+    logger.info(
+        "[TOOL_CALL] write_memory_tool user_id=%s memory_type=%s topic=%s content=%s",
+        user_id,
+        memory_type,
+        topic,
+        content,
+    )
+    try:
+        target = await _memory_store.write_memory(
+            user_id=user_id,
+            content=content,
+            memory_type=memory_type,
+            topic=topic,
+        )
+        result = f"Memory saved in {target}"
+        logger.info("[TOOL_RESULT] write_memory_tool result=%s", result)
+        return result
+    except Exception as e:
+        logger.error("write_memory_tool failed: %s", e)
+        return f"Error writing memory: {e}"
+
+
+async def get_memory_tool(
+    query: str,
+    user_id: str,
+    scope: str = "all",
+    top_k: int = 5,
+) -> str:
+    """
+    Retrieve relevant memory using semantic retrieval.
+
+    Args:
+        query: User query for memory lookup.
+        user_id: Current user id.
+        scope: startup | all
+        top_k: Number of chunks to return.
+    """
+    logger.info(
+        "[TOOL_CALL] get_memory_tool user_id=%s query=%s scope=%s top_k=%s",
+        user_id,
+        query,
+        scope,
+        top_k,
+    )
+    del user_id  # Reserved for future user-specific partitioning.
+
+    if _memory_store is None:
         return "Error: Memory tools not initialized."
 
-    logger.info(f"Storing memory for user {user_id}")
-
-    # 1. format/extract using LLM (SDK direct)
-    extraction_prompt = f"""
-    Analyze the following conversation or text and extract key distinct facts, preferences, or events that should be stored in long-term memory.
-    Return them as a single concise paragraph or list of statements.
-    
-    Text:
-    {conversation_history}
-    """
-    
     try:
-        response = _genai_client.models.generate_content(
-            model=_model_name,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=f"System: You are a memory manager.\n{extraction_prompt}")]
-                )
-            ]
-        )
-        formatted_content = response.text
-        if not formatted_content:
-            formatted_content = conversation_history # Fallback
-            
-        # 2. Embed
-        embedding = await _embedder.embed_query(formatted_content)
-        
-        # 3. Store
-        doc_id = _mongo_client.add_memory(
-            content=formatted_content,
-            embedding=embedding,
-            user_id=user_id
-        )
-        
-        print(f"[MEMORY STORE] Storing content: {formatted_content}")
-        print(f"[MEMORY ID] {doc_id}")
-        return f"Memory stored successfully (ID: {doc_id}). Content: {formatted_content}"
+        hits = await _memory_store.retrieve(query=query, scope=scope, top_k=top_k)
+        if not hits:
+            logger.info("[TOOL_RESULT] get_memory_tool no relevant memory found")
+            return "No relevant memory found."
 
+        lines = ["Relevant memory:"]
+        for hit in hits:
+            preview = hit.text.strip().replace("\n", " ")
+            if len(preview) > 400:
+                preview = preview[:400] + "..."
+            lines.append(f"- [{hit.score:.3f}] {hit.file_path}: {preview}")
+        result = "\n".join(lines)
+        logger.info("[TOOL_RESULT] get_memory_tool result=%s", result)
+        return result
     except Exception as e:
-        logger.error(f"Error in store_memory_tool: {e}")
-        return f"Error storing memory: {str(e)}"
+        logger.error("get_memory_tool failed: %s", e)
+        return f"Error getting memory: {e}"
 
-async def retrieve_memory_tool(query: str, user_id: str) -> str:
-    """
-    Retrieves relevant past memories based on a search query.
-    Call this when you need to recall user preferences, past events, or context.
-    
-    Args:
-        query: The search query (e.g., "what is my favorite color?", "project details").
-        user_id: The ID of the user.
-    """
-    if not _mongo_client or not _embedder:
-        return "Error: Memory tools not initialized."
 
-    logger.info(f"Retrieving memory for user {user_id} query='{query}'")
-
+async def append_chat_log(user_id: str, role: str, content: str) -> None:
+    """Internal helper for append-only daily logs."""
+    if _memory_store is None:
+        return
+    logger.info(
+        "[MEMORY_EVENT] append_chat_log requested user_id=%s role=%s content=%s",
+        user_id,
+        role,
+        content,
+    )
     try:
-        # 1. Embed Query
-        query_embedding = await _embedder.embed_query(query)
-        
-        # 2. Search
-        results = _mongo_client.search_memories(query_embedding, user_id, limit=5)
-        
-        if not results:
-            print("[MEMORY RETRIEVE] No results found.")
-            return "No relevant memories found."
-            
-        # 3. Format Output
-        context_str = "Found relevant memories:\n"
-        print(f"[MEMORY RETRIEVE] Query: {query}")
-        for doc in results:
-            content_preview = doc['content'][:100] + "..." if len(doc['content']) > 100 else doc['content']
-            print(f"[MEMORY HIT] (Sim: {doc.get('similarity', 0):.2f}) {content_preview}")
-            context_str += f"- {doc['content']} (Similarity: {doc.get('similarity', 0):.2f})\n"
-            
-        return context_str
-        
+        await _memory_store.append_chat_log(user_id=user_id, role=role, content=content)
+        logger.info("[MEMORY_EVENT] append_chat_log stored user_id=%s role=%s", user_id, role)
     except Exception as e:
-        logger.error(f"Error in retrieve_memory_tool: {e}")
-        return f"Error retrieving memory: {str(e)}"
+        logger.warning("append_chat_log failed: %s", e)
 
-async def save_chat_message(user_id: str, role: str, content: str) -> str:
-    """Save a chat message to history."""
-    if _mongo_client:
-        return _mongo_client.add_chat_history(user_id, role, content)
-    return ""
 
-async def get_chat_history(user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-    """Get chat history."""
-    if _mongo_client:
-        return _mongo_client.get_chat_history(user_id, limit)
-    return []
+async def get_startup_context(user_id: str, query: str, top_k: int = 4) -> str:
+    """Retrieve startup context from MEMORY.md + today/yesterday logs."""
+    logger.info(
+        "[MEMORY_EVENT] get_startup_context user_id=%s query=%s top_k=%s",
+        user_id,
+        query,
+        top_k,
+    )
+    result = await get_memory_tool(
+        query=query,
+        user_id=user_id,
+        scope="startup",
+        top_k=top_k,
+    )
+    logger.info("[MEMORY_EVENT] startup context result=%s", result)
+    return result
 
-async def check_and_store_memory(user_id: str) -> str:
-    """
-    Check if we have enough messages to trigger memory storage.
-    If yes, summarize and store.
-    """
-    if not _mongo_client or not _embedder or not _genai_client:
-        return "Error: Tools not initialized."
 
-    # 1. Fetch recent history (e.g., last 10 messages)
-    history = _mongo_client.get_chat_history(user_id, limit=10)
-    
-    total_count = _mongo_client.chat_collection.count_documents({"user_id": user_id})
-    
-    if total_count > 0 and total_count % 10 == 0:
-        logger.info(f"[AUTO-MEM] Triggering memory storage for user {user_id} (Count: {total_count})")
-        
-        # Convert history to string
-        history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history])
-        
-        # Reuse store logic
-        return await store_memory_tool(history_text, user_id)
-        
-    return "No storage triggered."
+def get_workspace_dir() -> str:
+    """Expose workspace dir default for external diagnostics."""
+    return os.environ.get("MEMORY_WORKSPACE_DIR", "workspace")
