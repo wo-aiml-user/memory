@@ -1,6 +1,6 @@
 """
 Document Controller
-Endpoints for document upload and delete.
+Endpoint for document upload.
 Uses Zep graph.add() for business data ingestion.
 """
 
@@ -126,36 +126,3 @@ async def upload_document(
     except Exception as e:
         logger.exception(f"[UPLOAD] Error: {e}")
         return error_response(f"Error uploading document: {str(e)}", 500)
-
-
-@router.delete("/delete")
-async def delete_document(
-    request: Request,
-    file_id: str = Form(...),
-    user_id: str = Form(...),
-):
-    """
-    Delete a document from memory.
-    
-    Note: Zep may not support direct deletion of individual facts.
-    
-    Args:
-        file_id: File identifier to delete
-        user_id: User identifier
-        
-    Returns:
-        Success response with deletion status
-    """
-    try:
-        logger.info(f"[DELETE] Deleting file_id: {file_id}, user: {user_id}")
-        
-        # TODO: Check if Zep supports fact deletion
-        return success_response({
-            "message": "Document deletion not yet supported",
-            "file_id": file_id,
-            "user_id": user_id
-        })
-        
-    except Exception as e:
-        logger.exception(f"[DELETE] Error: {e}")
-        return error_response(f"Error deleting document: {str(e)}", 500)

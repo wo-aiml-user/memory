@@ -17,7 +17,6 @@ async def create_token(request: TokenRequest):
     
     Returns:
     - access_token: The generated JWT token
-    - token_type: The type of token (bearer)
     """
     try:
         logger.info(f"Creating token for user_id: {request.user_id}")
@@ -30,8 +29,7 @@ async def create_token(request: TokenRequest):
         logger.info(f"Token created successfully for user_id: {request.user_id}")
         
         return success_response({
-            "access_token": token,
-            "token_type": "bearer"
+            "access_token": token
         }, 200)
         
     except Exception as e:

@@ -13,7 +13,6 @@ def setup_routes(app: FastAPI):
     Endpoints:
     - POST /api/auth/token - Generate JWT token
     - POST /api/document/upload - Upload documents
-    - DELETE /api/document/delete - Delete documents  
     - POST /api/chat - Chat with memory
     """
 

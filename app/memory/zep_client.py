@@ -263,6 +263,27 @@ class ZepMemoryClient:
             logger.exception(f"[RETRIEVE] Error getting context: {e}")
             return ""
     
+    async def _ensure_user_exists(self, user_id: str) -> None:
+        """
+        Ensure the Zep user exists (required before graph.add).
+        Creates the user if they don't exist yet.
+        
+        Args:
+            user_id: User identifier
+        """
+        try:
+            self.zep.user.get(user_id)
+            logger.debug(f"[USER] User already exists: {user_id}")
+        except NotFoundError:
+            logger.info(f"[USER] User not found, creating: {user_id}")
+            try:
+                self.zep.user.add(user_id=user_id)
+                logger.info(f"[USER] User created successfully: {user_id}")
+            except Exception as create_err:
+                logger.warning(f"[USER] User creation may have failed (will try anyway): {create_err}")
+        except Exception as e:
+            logger.warning(f"[USER] Could not verify user existence (will try anyway): {e}")
+
     async def add_business_data(
         self,
         user_id: str,
@@ -292,7 +313,9 @@ class ZepMemoryClient:
             logger.info(f"[DOCUMENT] Source: {source}")
             logger.info(f"[DOCUMENT] Total Data Length: {len(data)} characters")
             
-            # Ensure user exists by creating a thread first
+            # Ensure both user AND thread exist.
+            # graph.add(user_id=...) requires the user to be registered in Zep.
+            await self._ensure_user_exists(user_id)
             await self._ensure_thread_exists(user_id)
             
             # 1. Generate unique document ID
@@ -315,6 +338,7 @@ class ZepMemoryClient:
                     "source": source
                 })
                 
+                logger.info(f"[DOCUMENT] Sending chunk {idx + 1}/{total_chunks} to graph.add (user_id={user_id}, type=json, size={len(chunk_content)})")
                 self.zep.graph.add(
                     user_id=user_id,
                     type="json",
