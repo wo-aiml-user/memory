@@ -11,12 +11,14 @@ from google import genai
 from google.genai import types
 
 from .memory_tools import (
+    GET_MEMORY_TOOL_SCHEMA,
+    WRITE_MEMORY_TOOL_SCHEMA,
     append_chat_log,
     get_memory_tool,
-    get_startup_context,
     init_tools,
     write_memory_tool,
 )
+from .prompt import system_instruction
 
 logger = logging.getLogger("memory_chat.chain")
 
@@ -54,7 +56,7 @@ class MemoryChain:
         # Init file-based memory backend
         init_tools(voyage_key, workspace_dir=workspace_dir, assistant_id=assistant_id)
 
-        self.tools_list = [get_memory_tool, write_memory_tool]
+        self.tools_list = [types.Tool(function_declarations=[GET_MEMORY_TOOL_SCHEMA, WRITE_MEMORY_TOOL_SCHEMA])]
         self.tools_map = {
             "get_memory_tool": get_memory_tool,
             "write_memory_tool": write_memory_tool,
@@ -71,34 +73,13 @@ class MemoryChain:
 
         await append_chat_log(user_id, "user", message)
 
-        startup_context = ""
-        if user_id not in self._session_bootstrapped_users:
-            logger.info("[CHAIN_EVENT] startup context retrieval triggered user_id=%s", user_id)
-            startup_context = await get_startup_context(user_id=user_id, query=message, top_k=4)
-            self._session_bootstrapped_users.add(user_id)
-        else:
-            logger.info("[CHAIN_EVENT] startup context retrieval skipped already_bootstrapped user_id=%s", user_id)
-
-        system_instruction = (
-            "You are a helpful assistant with long-term memory tools.\n"
-            "Use get_memory_tool(query, user_id, scope='all') to recall context.\n"
-            "Use write_memory_tool(content, user_id, memory_type, topic) only for important durable facts.\n"
-            "Memory types: daily, projects, curated.\n"
-            f"Current user_id: {user_id}\n"
-        )
-
-        if startup_context and not startup_context.startswith("No relevant memory found"):
-            system_instruction += f"\nStartup memory context:\n{startup_context}\n"
-            logger.info("[CHAIN_PROMPT] startup context injected user_id=%s context=%s", user_id, startup_context)
-        else:
-            logger.info("[CHAIN_PROMPT] no startup context injected user_id=%s", user_id)
-
-        logger.info("[CHAIN_PROMPT] final system instruction user_id=%s prompt=%s", user_id, system_instruction)
+        system_instruction_text = system_instruction
+        logger.info("[CHAIN_PROMPT] final system instruction user_id=%s prompt=%s", user_id, system_instruction_text)
 
         config = types.GenerateContentConfig(
             tools=self.tools_list,
-            system_instruction=system_instruction,
-            temperature=0.6,
+            system_instruction=system_instruction_text,
+            temperature=0.5,
         )
 
         contents: List[types.Content] = []
@@ -126,7 +107,13 @@ class MemoryChain:
 
             for turn in range(1, max_turns + 1):
                 logger.info("[CHAIN_LOOP] turn=%s user_id=%s", turn, user_id)
-                function_calls = response.function_calls
+                
+                function_calls = []
+                if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                    for part in response.candidates[0].content.parts:
+                        if part.function_call:
+                            function_calls.append(part.function_call)
+                            
                 if not function_calls:
                     final_response_text = response.text or ""
                     logger.info("[CHAIN_MODEL] no function calls turn=%s response=%s", turn, final_response_text)

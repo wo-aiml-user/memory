@@ -173,3 +173,34 @@ async def get_startup_context(user_id: str, query: str, top_k: int = 4) -> str:
 def get_workspace_dir() -> str:
     """Expose workspace dir default for external diagnostics."""
     return os.environ.get("MEMORY_WORKSPACE_DIR", "workspace")
+
+
+GET_MEMORY_TOOL_SCHEMA = {
+    "name": "get_memory_tool",
+    "description": "Retrieve relevant memory using semantic retrieval.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "User query for memory lookup."},
+            "user_id": {"type": "string", "description": "Current user id."},
+            "scope": {"type": "string", "description": "startup | all"},
+            "top_k": {"type": "integer", "description": "Number of chunks to return."}
+        },
+        "required": ["query", "user_id"]
+    }
+}
+
+WRITE_MEMORY_TOOL_SCHEMA = {
+    "name": "write_memory_tool",
+    "description": "Write new memory into the file-based memory system.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "content": {"type": "string", "description": "The memory content to save."},
+            "user_id": {"type": "string", "description": "Current user id."},
+            "memory_type": {"type": "string", "description": "daily | projects | curated"},
+            "topic": {"type": "string", "description": "Topic label for organization."}
+        },
+        "required": ["content", "user_id"]
+    }
+}
